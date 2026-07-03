@@ -487,8 +487,6 @@ function project(inp, opts = {}) {
 
     if (!light) {
       const accessible = (p1Can ? sup1 : 0) + (p2AgeNow >= PRESERVATION_AGE ? sup2 : 0) + inv + cash;
-      const yearsToRet = Math.max(0, retirementAge - age);
-      const coastNow   = coastTarget(fi, yearsToRet, realR);
 
       const supAll = sup1 + sup2;
       const yToPreserv = Math.max(0, PRESERVATION_AGE - age);
@@ -509,8 +507,17 @@ function project(inp, opts = {}) {
         : earlyFIBridge(effFull, supAll, yToPreserv, realR, realSupR, swr);
       const checkW = age >= PRESERVATION_AGE ? total : accessible;
 
+      // Coast target: full FIRE number discounted back to now. Pre-60, only
+      // liquid assets can fund the bridge to preservation age — super is
+      // locked and must be checked via earlyFIBridge like the other
+      // milestones, not just discounted as part of one undifferentiated total.
+      const coastNow = retirementAge >= PRESERVATION_AGE
+        ? coastTarget(fi, Math.max(0, retirementAge - age), realR)
+        : earlyFIBridge(effFull, supAll, yToPreserv, realR, realSupR, swr);
+      const coastCheckW = retirementAge >= PRESERVATION_AGE ? total : accessible;
+
       if (!leanAge    && checkW >= leanTgt)    leanAge    = age;
-      if (!coastAge   && total  >= coastNow)   coastAge   = age;
+      if (!coastAge   && coastCheckW >= coastNow) coastAge = age;
       if (!baristaAge && checkW >= baristaTgt) baristaAge = age;
       if (!fullAge    && checkW >= fullTgt)    fullAge    = age;
 
@@ -1952,8 +1959,10 @@ function _calc() {
   const houseExpNoteFn = (adj) => adj !== 0
     ? ` <span style="font-size:10px;color:var(--text-muted)">(${adj > 0 ? '+mortgage −rent' : '−rent, no mortgage'})</span>` : '';
 
-  const currentCoastTgt = coastTarget(targets.fiEff, inp.retirementAge - inp.currentAge,
+  const coastRow = rows.find(r => r.age === inp.currentAge);
+  const currentCoastTgt = coastRow ? coastRow.coastNow : coastTarget(targets.fiEff, inp.retirementAge - inp.currentAge,
     (1 + inp.investReturn) / (1 + inp.inflation) - 1);
+  const currentCoastCheckW = inp.retirementAge >= PRESERVATION_AGE ? currentTotal : currentAccessible;
 
   const hhTagText = inp.couple ? 'household total' : 'your total';
   const hhTag = `<span style="font-size:10px;font-weight:600;color:var(--coast);background:rgba(37,99,235,0.08);border-radius:3px;padding:1px 4px;margin-left:3px">${hhTagText}</span>`;
@@ -1970,8 +1979,8 @@ function _calc() {
 
   renderCard('coast', milestones.coastAge, inp.currentAge, currentCoastTgt,
     `Stop ALL extra contributions &mdash; ${cDesc} to ${fmtK(targets.fiEff)} ${hhTag} by age ${inp.retirementAge}<br>
-     <span style="font-size:10px;color:var(--text-muted)">Uses total wealth incl. super (still employed during coast)</span>`,
-    currentTotal / currentCoastTgt * 100);
+     <span style="font-size:10px;color:var(--text-muted)">${inp.retirementAge >= PRESERVATION_AGE ? 'Uses total wealth incl. super (still employed during coast)' : 'Liquid assets must bridge to age 60 &mdash; super compounds untouched'}</span>`,
+    currentCoastCheckW / currentCoastTgt * 100);
 
   const baristaD = getCardData(milestones.baristaAge, 'baristaTgt', targets.baristaFI, inp.baristaExpenses);
   renderCard('barista', milestones.baristaAge, inp.currentAge, baristaD.targetVal,
