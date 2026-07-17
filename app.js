@@ -287,9 +287,12 @@ function project(inp, opts = {}) {
     //   buying→payoff: replace rent with mortgage repayment (nominal repayment
     //                  discounted to real dollars, since it's fixed for the loan's life)
     //   post-payoff:   remove rent, no mortgage
-    const mortgageRepaymentReal = mortgageRepaymentNominal / Math.pow(1 + inflation, age - houseBuyAge);
+    const mortgageActive = houseBuyActive && age >= houseBuyAge &&
+      (mortgagePaidAge == null || age < mortgagePaidAge);
+    const mortgageRepaymentReal = mortgageActive
+      ? mortgageRepaymentNominal / Math.pow(1 + inflation, age - houseBuyAge) : 0;
     const houseExpAdj = !houseBuyActive || age < houseBuyAge ? 0
-      : (mortgagePaidAge == null || age < mortgagePaidAge) ? (mortgageRepaymentReal - rentSaving)
+      : mortgageActive ? (mortgageRepaymentReal - rentSaving)
       : -rentSaving;
     // Whether we own the home yet (affects Age Pension assets test homeowner threshold)
     const isHomeowner = homeowner || (houseBuyActive && age >= houseBuyAge);
@@ -537,7 +540,7 @@ function project(inp, opts = {}) {
         coastNow, leanTgt, baristaTgt, fullTgt,
         annualSavings, sgContrib, extraConc, netSuperContrib, annualTax, invTax,
         pension: pensionY, supDraw, invDraw, cashDraw, householdNet,
-        houseExpAdj,
+        houseExpAdj, mortgageRepaymentReal,
       });
     }
   }
@@ -785,7 +788,7 @@ function resetDefaults() {
 function exportCSV() {
   if (!_lastRows.length) return;
   const cols = ['Age', 'Phase', 'Net income', 'Tax', 'Savings to investments', 'Net super contributions',
-    'Age pension', 'Super drawdown', 'Investment drawdown', 'Cash drawdown',
+    'Age pension', 'Mortgage repayment', 'Super drawdown', 'Investment drawdown', 'Cash drawdown',
     'Super balance', 'Investments', 'Cash', 'Total wealth'];
   const lines = [cols.join(',')];
   _lastRows.forEach(r => {
@@ -794,7 +797,8 @@ function exportCSV() {
       Math.round(r.annualTax.net ?? r.householdNet),
       Math.round((r.annualTax.total ?? 0) + (r.invTax ?? 0)),
       Math.round(r.annualSavings), Math.round(r.netSuperContrib),
-      Math.round(r.pension), Math.round(r.supDraw), Math.round(r.invDraw), Math.round(r.cashDraw),
+      Math.round(r.pension), Math.round(r.mortgageRepaymentReal ?? 0),
+      Math.round(r.supDraw), Math.round(r.invDraw), Math.round(r.cashDraw),
       Math.round(r.supReal), Math.round(r.invReal), Math.round(r.cashReal), Math.round(r.totalReal),
     ].join(','));
   });
@@ -1833,6 +1837,7 @@ function renderYearTable(rows, couple) {
       <td>${f(r.annualSavings)}</td>
       <td>${f(r.netSuperContrib)}</td>
       <td>${f(r.pension)}</td>
+      <td>${f(r.mortgageRepaymentReal)}</td>
       <td>${f(r.supDraw + r.invDraw + r.cashDraw)}</td>
       <td>${fmtK(r.supReal)}</td>
       <td>${fmtK(r.invReal)}</td>
@@ -1851,7 +1856,7 @@ function renderYearTable(rows, couple) {
     <table class="year-table">
       <thead><tr>
         <th class="yt-l">${ageHeader}</th><th class="yt-l">Phase</th><th>${netIncomeHeader}</th><th>Tax</th>
-        <th>Saved</th><th>→ Super</th><th>Pension</th><th>Drawdown</th>
+        <th>Saved</th><th>→ Super</th><th>Pension</th><th>Mortgage</th><th>Drawdown</th>
         <th>Super</th><th>Invest</th><th>Cash</th><th>Total</th>
       </tr></thead>
       <tbody>${body}</tbody>
