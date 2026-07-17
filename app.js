@@ -147,14 +147,17 @@ function annualMortgageRepayment(principal, annualRate, termYears) {
 
 // Effective full expenses at a given age, adjusted for house purchase/mortgage/payoff.
 // Returns the adjusted fullExpenses (rent removed, mortgage substituted where applicable).
+// The mortgage repayment is fixed in nominal dollars, so its real-dollar burden
+// shrinks each year with inflation — same treatment as a flat (non-growing) salary.
 function houseExpAdjAt(inp, age) {
   const { houseDeposit = 0, houseBuyAge = 0, mortgageAmount = 0, rentSaving = 0,
-          mortgageRate = 0, mortgageTerm = 0, fullExpenses } = inp;
+          mortgageRate = 0, mortgageTerm = 0, fullExpenses, inflation = 0 } = inp;
   const active = houseDeposit > 0 || mortgageAmount > 0;
   if (!active || age < houseBuyAge) return fullExpenses;
-  const repayment = annualMortgageRepayment(mortgageAmount, mortgageRate, mortgageTerm);
+  const repaymentNominal = annualMortgageRepayment(mortgageAmount, mortgageRate, mortgageTerm);
+  const repaymentReal = repaymentNominal / Math.pow(1 + inflation, age - houseBuyAge);
   const paidAge   = mortgageTerm > 0 ? houseBuyAge + mortgageTerm : null;
-  const adj = (paidAge == null || age < paidAge) ? (repayment - rentSaving) : -rentSaving;
+  const adj = (paidAge == null || age < paidAge) ? (repaymentReal - rentSaving) : -rentSaving;
   return Math.max(0, fullExpenses + adj);
 }
 
@@ -182,9 +185,9 @@ function project(inp, opts = {}) {
     mortgageRate = 0, mortgageTerm = 0,
   } = inp;
 
-  // Pre-compute mortgage annual repayment (nominal dollars; inputs are in today's $
-  // so we treat it as a real cost — like all other expense figures in this engine)
-  const mortgageRepayment = annualMortgageRepayment(mortgageAmount, mortgageRate, mortgageTerm);
+  // Mortgage repayment is fixed in nominal dollars for the loan's life, so its
+  // real-dollar burden shrinks each year with inflation (discounted per-year below).
+  const mortgageRepaymentNominal = annualMortgageRepayment(mortgageAmount, mortgageRate, mortgageTerm);
   const houseBuyActive    = houseDeposit > 0 || mortgageAmount > 0;
   const mortgagePaidAge   = houseBuyActive && mortgageTerm > 0 ? houseBuyAge + mortgageTerm : null;
 
@@ -278,10 +281,12 @@ function project(inp, opts = {}) {
 
     // Expense adjustment for house purchase phase:
     //   pre-buy:       base expenses (includes rent)
-    //   buying→payoff: replace rent with mortgage repayment
+    //   buying→payoff: replace rent with mortgage repayment (nominal repayment
+    //                  discounted to real dollars, since it's fixed for the loan's life)
     //   post-payoff:   remove rent, no mortgage
+    const mortgageRepaymentReal = mortgageRepaymentNominal / Math.pow(1 + inflation, age - houseBuyAge);
     const houseExpAdj = !houseBuyActive || age < houseBuyAge ? 0
-      : (mortgagePaidAge == null || age < mortgagePaidAge) ? (mortgageRepayment - rentSaving)
+      : (mortgagePaidAge == null || age < mortgagePaidAge) ? (mortgageRepaymentReal - rentSaving)
       : -rentSaving;
     // Whether we own the home yet (affects Age Pension assets test homeowner threshold)
     const isHomeowner = homeowner || (houseBuyActive && age >= houseBuyAge);
