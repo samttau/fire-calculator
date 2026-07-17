@@ -149,6 +149,10 @@ function annualMortgageRepayment(principal, annualRate, termYears) {
 // Returns the adjusted fullExpenses (rent removed, mortgage substituted where applicable).
 // The mortgage repayment is fixed in nominal dollars, so its real-dollar burden
 // shrinks each year with inflation — same treatment as a flat (non-growing) salary.
+// NOTE: this uses the base (no extra repayments) term/payoff age as an approximation —
+// it's called standalone for FI-target comparisons, without the year-by-year savings
+// figures needed to replay extra repayments. The main project() loop below tracks the
+// real accelerated payoff when extraRepaymentPct is set.
 function houseExpAdjAt(inp, age) {
   const { houseDeposit = 0, houseBuyAge = 0, mortgageAmount = 0, rentSaving = 0,
           mortgageRate = 0, mortgageTerm = 0, fullExpenses, inflation = 0 } = inp;
@@ -182,14 +186,19 @@ function project(inp, opts = {}) {
     slowGoAge = 75, slowGoPct = 0,
     windfallAmount = 0, windfallAge = 0, oneOffAmount = 0, oneOffAge = 0,
     houseDeposit = 0, houseBuyAge = 0, mortgageAmount = 0, rentSaving = 0,
-    mortgageRate = 0, mortgageTerm = 0,
+    mortgageRate = 0, mortgageTerm = 0, extraRepaymentPct = 0,
   } = inp;
 
   // Mortgage repayment is fixed in nominal dollars for the loan's life, so its
   // real-dollar burden shrinks each year with inflation (discounted per-year below).
   const mortgageRepaymentNominal = annualMortgageRepayment(mortgageAmount, mortgageRate, mortgageTerm);
   const houseBuyActive    = houseDeposit > 0 || mortgageAmount > 0;
-  const mortgagePaidAge   = houseBuyActive && mortgageTerm > 0 ? houseBuyAge + mortgageTerm : null;
+  // Outstanding loan balance (nominal $, since interest accrues in nominal terms).
+  // Amortizes down each year by the base repayment plus any extra repayment
+  // redirected from savings; payoff age is wherever the balance actually hits
+  // zero, not a fixed houseBuyAge+term (which only holds absent extra repayments).
+  let loanBalance = 0;
+  let mortgagePaidAge = null;
 
   const light = !!opts.light;          // Monte Carlo mode: skip rows/milestones
   const vol   = opts.vol || 0;
@@ -275,11 +284,14 @@ function project(inp, opts = {}) {
     // House purchase: draw deposit from cash then investments at buy age.
     // Super isn't a realistic source for a house deposit outside FHSSS, so it's
     // excluded here — any shortfall surfaces as a normal depletion warning.
-    if (houseBuyActive && age === houseBuyAge && houseDeposit > 0) {
-      let dep = houseDeposit;
-      const c = Math.min(dep, cash); cash -= c; dep -= c;
-      const i = Math.min(dep, inv);  inv  -= i; dep -= i;
-      if (dep > 1 && !failed) { failed = true; depleteAge = age; }
+    if (houseBuyActive && age === houseBuyAge) {
+      loanBalance = mortgageAmount;
+      if (houseDeposit > 0) {
+        let dep = houseDeposit;
+        const c = Math.min(dep, cash); cash -= c; dep -= c;
+        const i = Math.min(dep, inv);  inv  -= i; dep -= i;
+        if (dep > 1 && !failed) { failed = true; depleteAge = age; }
+      }
     }
 
     // Expense adjustment for house purchase phase:
@@ -287,8 +299,10 @@ function project(inp, opts = {}) {
     //   buying→payoff: replace rent with mortgage repayment (nominal repayment
     //                  discounted to real dollars, since it's fixed for the loan's life)
     //   post-payoff:   remove rent, no mortgage
-    const mortgageActive = houseBuyActive && age >= houseBuyAge &&
-      (mortgagePaidAge == null || age < mortgagePaidAge);
+    // mortgageActive reflects the balance carried in from last year's amortization
+    // (see extra-repayment block below), so payoff can land earlier than houseBuyAge+term.
+    const mortgageActive = houseBuyActive && age >= houseBuyAge && loanBalance > 0;
+    let extraRepaymentReal = 0; // set below when working & redirecting savings; amortized after both branches
     const mortgageRepaymentReal = mortgageActive
       ? mortgageRepaymentNominal / Math.pow(1 + inflation, age - houseBuyAge) : 0;
     const houseExpAdj = !houseBuyActive || age < houseBuyAge ? 0
@@ -337,6 +351,10 @@ function project(inp, opts = {}) {
       const cashflow = takeHome - (currentExpenses + houseExpAdj) - nonConc;
       if (cashflow >= 0) {
         annualSavings = cashflow;
+        if (mortgageActive && extraRepaymentPct > 0) {
+          extraRepaymentReal = annualSavings * extraRepaymentPct;
+          annualSavings -= extraRepaymentReal;
+        }
       } else {
         let deficit = -cashflow;
         const c = Math.min(deficit, cash); cash -= c; deficit -= c; cashDraw = c;
@@ -484,6 +502,15 @@ function project(inp, opts = {}) {
       sup2 = growSuper(Math.max(0, sup2 + p2ToSup2), p2Tapped);
       inv  = Math.max(0, inv - invDraw + excessToInv) * (1 + rInv);
       cash = Math.max(0, cash - cashDraw)             * (1 + realCashR);
+    }
+
+    // Amortize the mortgage: interest accrues in nominal terms, then the base
+    // repayment and any extra repayment (converted back to nominal $) pay it down.
+    // Payoff age is recorded the first year the balance actually reaches zero.
+    if (mortgageActive) {
+      const extraRepaymentNominal = extraRepaymentReal * Math.pow(1 + inflation, age - houseBuyAge);
+      loanBalance = loanBalance * (1 + mortgageRate) - mortgageRepaymentNominal - extraRepaymentNominal;
+      if (loanBalance <= 0) { loanBalance = 0; mortgagePaidAge = age + 1; }
     }
 
     // Settle this year's tax on investment/cash income
@@ -976,6 +1003,7 @@ function getInputs() {
     rentSaving:     planHousePurchase ? num('rentSaving') : 0,
     mortgageRate:   planHousePurchase ? num('mortgageRate') / 100 : 0,
     mortgageTerm:   planHousePurchase ? (num('mortgageTerm') || 30) : 0,
+    extraRepaymentPct: planHousePurchase ? num('extraRepaymentPct') / 100 : 0,
   };
 }
 
@@ -1890,20 +1918,6 @@ function _calc() {
 
   updateCoupleUI(inp.couple);
 
-  // Mortgage repayment hint
-  const mortgageHint = document.getElementById('mortgage-repayment-hint');
-  if (mortgageHint) {
-    const repay = annualMortgageRepayment(inp.mortgageAmount, inp.mortgageRate, inp.mortgageTerm);
-    const active = inp.houseDeposit > 0 || inp.mortgageAmount > 0;
-    if (active && repay > 0) {
-      const paidAge = inp.houseBuyAge + inp.mortgageTerm;
-      mortgageHint.textContent = `Annual repayment: ${fmt(repay)}/yr (${fmt(repay / 12)}/mo) · mortgage-free at age ${paidAge}`;
-      mortgageHint.style.display = 'block';
-    } else {
-      mortgageHint.style.display = 'none';
-    }
-  }
-
   _lastInp = inp;
 
   const p1SG    = inp.grossSalary * inp.sgRate;
@@ -1923,6 +1937,22 @@ function _calc() {
   const partnerResult      = inp.couple ? projectPartner(inp, p1NetNow) : null;
   const primaryResult      = inp.couple ? projectPrimary(inp, p2NetNow) : null;
   _lastRows = result.rows;
+
+  // Mortgage repayment hint — uses the actual simulated payoff age, which lands
+  // earlier than houseBuyAge+term whenever extra repayments are set.
+  const mortgageHint = document.getElementById('mortgage-repayment-hint');
+  if (mortgageHint) {
+    const repay = annualMortgageRepayment(inp.mortgageAmount, inp.mortgageRate, inp.mortgageTerm);
+    const active = inp.houseDeposit > 0 || inp.mortgageAmount > 0;
+    if (active && repay > 0) {
+      const paidAge = result.milestones.mortgagePaidAge ?? (inp.houseBuyAge + inp.mortgageTerm);
+      const extraNote = inp.extraRepaymentPct > 0 ? ` (with ${(inp.extraRepaymentPct * 100).toFixed(0)}% extra repayments)` : '';
+      mortgageHint.textContent = `Annual repayment: ${fmt(repay)}/yr (${fmt(repay / 12)}/mo) · mortgage-free at age ${paidAge}${extraNote}`;
+      mortgageHint.style.display = 'block';
+    } else {
+      mortgageHint.style.display = 'none';
+    }
+  }
 
   window._lastAuditLog = [
     '🔥 FIRE Calculator Audit Logs (Calculations & Output)',

@@ -374,6 +374,14 @@
               <input type="number" id="mortgageTerm" value="30" min="5" max="40" step="1" oninput="calc()">
             </div>
           </div>
+          <div class="input-row">
+            <div class="field">
+              <label>Extra repayments (% of yearly savings)
+                <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Redirects this share of each year's leftover savings (after expenses) into extra mortgage repayments instead of investing it, while you're still working. Pays the loan off faster and cuts total interest, at the cost of less invested along the way.</span></div>
+              </label>
+              <input type="number" id="extraRepaymentPct" value="0" min="0" max="100" step="5" oninput="calc()">
+            </div>
+          </div>
           <div class="hint" id="mortgage-repayment-hint" style="margin-top:4px"></div>
         </div>
       </div>
