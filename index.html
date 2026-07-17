@@ -337,7 +337,7 @@
           <label class="toggle"><input type="checkbox" id="planHousePurchase" onchange="toggleVis('house-purchase-fields', this.checked);calc()"><span class="toggle-slider"></span></label>
         </div>
         <div id="house-purchase-fields" style="display:none">
-          <div class="expenses-note" style="margin-top:12px">Models buying a home at a future age: the deposit is drawn from savings, mortgage repayments replace rent in your expense budget, and the property counts as your principal residence (homeowner) from that age onward for Age Pension purposes.</div>
+          <div class="expenses-note" style="margin-top:12px">Models buying a home at a future age: the deposit is drawn from savings (cash then investments — not super), mortgage repayments replace rent in your expense budget, and the property counts as your principal residence (homeowner) from that age onward for Age Pension purposes. Stamp duty and other purchase costs aren't added automatically — fold them into the deposit or mortgage amount. Property appreciation and ongoing costs (rates, insurance, maintenance) beyond the mortgage/rent swap aren't modelled.</div>
           <div class="input-row">
             <div class="field">
               <label>Deposit
@@ -353,7 +353,7 @@
           <div class="input-row">
             <div class="field">
               <label>Mortgage amount
-                <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Amount borrowed. Annual repayments are calculated from this, the interest rate and loan term. Today's dollars.</span></div>
+                <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Amount borrowed. Include stamp duty and other purchase costs here (or in the deposit) if you're not paying them from a separate source — they aren't added automatically. Annual repayments are calculated from this, the interest rate and loan term. Today's dollars.</span></div>
               </label>
               <div class="input-prefix"><span>$</span><input type="number" id="mortgageAmount" value="0" min="0" step="10000" oninput="calc()"></div>
             </div>
