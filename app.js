@@ -230,6 +230,9 @@ function project(inp, opts = {}) {
 
   const fi     = fiNumber(fullExpenses, swr);
   const leanFI = fiNumber(leanExpenses, swr);
+  // Coast target uses expenses as they'll be AT retirement age, so a house
+  // purchase that changes the expense level by then is reflected correctly.
+  const fiAtRetirement = fiNumber(houseExpAdjAt(inp, retirementAge), swr);
 
   const rows = [], totalsReal = [];
   let leanAge = null, coastAge = null, baristaAge = null, fullAge = null;
@@ -269,13 +272,13 @@ function project(inp, opts = {}) {
       if (ev > 0 && p2Can) { const s = Math.min(ev, sup2); sup2 -= s; ev -= s; if (s > 0) p2Tapped = true; }
       if (ev > 1 && !failed) { failed = true; depleteAge = age; }
     }
-    // House purchase: draw deposit from portfolio at buy age
+    // House purchase: draw deposit from cash then investments at buy age.
+    // Super isn't a realistic source for a house deposit outside FHSSS, so it's
+    // excluded here — any shortfall surfaces as a normal depletion warning.
     if (houseBuyActive && age === houseBuyAge && houseDeposit > 0) {
       let dep = houseDeposit;
       const c = Math.min(dep, cash); cash -= c; dep -= c;
       const i = Math.min(dep, inv);  inv  -= i; dep -= i;
-      if (dep > 0 && p1Can) { const s = Math.min(dep, sup1); sup1 -= s; dep -= s; if (s > 0) p1Tapped = true; }
-      if (dep > 0 && p2Can) { const s = Math.min(dep, sup2); sup2 -= s; dep -= s; if (s > 0) p2Tapped = true; }
       if (dep > 1 && !failed) { failed = true; depleteAge = age; }
     }
 
@@ -517,7 +520,7 @@ function project(inp, opts = {}) {
       // locked and must be checked via earlyFIBridge like the other
       // milestones, not just discounted as part of one undifferentiated total.
       const coastNow = retirementAge >= PRESERVATION_AGE
-        ? coastTarget(fi, Math.max(0, retirementAge - age), realR)
+        ? coastTarget(fiAtRetirement, Math.max(0, retirementAge - age), realR)
         : earlyFIBridge(effFull, supAll, yToPreserv, realR, realSupR, swr);
       const coastCheckW = retirementAge >= PRESERVATION_AGE ? total : accessible;
 
