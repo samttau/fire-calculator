@@ -725,6 +725,150 @@ function collectFormValues() {
   return vals;
 }
 
+function updateSegmentedUI(id, val) {
+  const wrapper = document.getElementById(`${id}-segmented`);
+  if (!wrapper) return;
+  wrapper.querySelectorAll('.seg-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-val') === val);
+  });
+}
+
+function setSegmented(id, value) {
+  const selectEl = document.getElementById(id);
+  if (selectEl) {
+    selectEl.value = value;
+    if (id === 'status') {
+      updateCoupleUI(value === 'couple');
+    }
+    calc();
+  }
+  updateSegmentedUI(id, value);
+}
+
+function showToast(message, type = 'info', icon = '✨') {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.innerHTML = `<span class="toast-icon">${icon}</span><span>${message}</span>`;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add('toast-out');
+    setTimeout(() => toast.remove(), 250);
+  }, 3200);
+}
+
+function switchMobileTab(tab) {
+  const app = document.querySelector('.app');
+  const btnInputs = document.getElementById('mob-tab-inputs');
+  const btnResults = document.getElementById('mob-tab-results');
+  if (tab === 'results') {
+    app?.classList.add('show-results');
+    btnResults?.classList.add('active');
+    btnInputs?.classList.remove('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } else {
+    app?.classList.remove('show-results');
+    btnInputs?.classList.add('active');
+    btnResults?.classList.remove('active');
+  }
+}
+
+let _confettiFired = false;
+function triggerMilestoneConfetti() {
+  if (typeof confetti === 'function' && !_confettiFired) {
+    _confettiFired = true;
+    try {
+      confetti({
+        particleCount: 65,
+        spread: 65,
+        origin: { y: 0.6 },
+        colors: ['#A855F7', '#3B82F6', '#10B981', '#F59E0B']
+      });
+    } catch (_) {}
+    setTimeout(() => { _confettiFired = false; }, 8000);
+  }
+}
+
+const PRESETS = {
+  standard: {
+    name: 'Aussie Average ($95k)',
+    currentAge: 35, retirementAge: 55, status: 'single', homeowner: 'yes',
+    grossSalary: 95000, extraConcessional: 0, carryForwardCap: 0, extraNonConcessional: 0,
+    hasHECS: false, privateHealth: true, salaryGrowth: true,
+    superBalance: 85000, investBalance: 30000, cashBalance: 20000,
+    currentExpenses: 60000, leanExpenses: 32000, baristaExpenses: 55000, baristaIncome: 25000, fullExpenses: 70000,
+    baristaStopAge: 65, slowGoPct: 0, slowGoAge: 75, includeAgePension: true,
+    windfallAmount: 0, oneOffAmount: 0, planHousePurchase: false,
+    investReturn: 7.0, superReturn: 7.5, taxableShare: 50, retVol: 12, inflation: 3.0, swr: 4.0, sgRate: 12.0, cashReturn: 4.0
+  },
+  tech: {
+    name: 'High Earner ($180k)',
+    currentAge: 30, retirementAge: 48, status: 'single', homeowner: 'yes',
+    grossSalary: 180000, extraConcessional: 10000, carryForwardCap: 0, extraNonConcessional: 0,
+    hasHECS: false, privateHealth: true, salaryGrowth: true,
+    superBalance: 120000, investBalance: 150000, cashBalance: 30000,
+    currentExpenses: 75000, leanExpenses: 45000, baristaExpenses: 65000, baristaIncome: 35000, fullExpenses: 90000,
+    baristaStopAge: 65, slowGoPct: 0, slowGoAge: 75, includeAgePension: true,
+    windfallAmount: 0, oneOffAmount: 0, planHousePurchase: false,
+    investReturn: 7.5, superReturn: 8.0, taxableShare: 50, retVol: 14, inflation: 3.0, swr: 3.75, sgRate: 12.0, cashReturn: 4.0
+  },
+  couple: {
+    name: 'Power Couple ($240k combined)',
+    currentAge: 35, retirementAge: 55, status: 'couple', homeowner: 'yes',
+    partnerAge: 32, partnerRetirementAge: 55, partnerSalary: 110000,
+    grossSalary: 130000, extraConcessional: 5000, carryForwardCap: 0, extraNonConcessional: 0,
+    hasHECS: false, privateHealth: true, salaryGrowth: true,
+    partnerExtraConcessional: 5000, partnerCarryForwardCap: 0, partnerHasHECS: false, contribTarget: 'split',
+    superBalance: 110000, investBalance: 60000, cashBalance: 25000,
+    partnerSuperBalance: 75000, partnerInvestBalance: 40000, partnerCashBalance: 20000, investHolder: 'lower',
+    currentExpenses: 85000, leanExpenses: 48000, baristaExpenses: 70000, baristaIncome: 30000, fullExpenses: 100000,
+    baristaStopAge: 65, slowGoPct: 0, slowGoAge: 75, includeAgePension: true,
+    windfallAmount: 0, oneOffAmount: 0, planHousePurchase: false,
+    investReturn: 7.0, superReturn: 7.5, taxableShare: 50, retVol: 12, inflation: 3.0, swr: 4.0, sgRate: 12.0, cashReturn: 4.0
+  },
+  barista: {
+    name: 'Barista Dreamer (Semi-Retire 42)',
+    currentAge: 28, retirementAge: 42, status: 'single', homeowner: 'no',
+    grossSalary: 75000, extraConcessional: 0, carryForwardCap: 0, extraNonConcessional: 0,
+    hasHECS: false, privateHealth: true, salaryGrowth: true,
+    superBalance: 40000, investBalance: 65000, cashBalance: 15000,
+    currentExpenses: 45000, leanExpenses: 28000, baristaExpenses: 42000, baristaIncome: 28000, fullExpenses: 55000,
+    baristaStopAge: 60, slowGoPct: 0, slowGoAge: 75, includeAgePension: true,
+    windfallAmount: 0, oneOffAmount: 0, planHousePurchase: false,
+    investReturn: 7.0, superReturn: 7.5, taxableShare: 50, retVol: 12, inflation: 3.0, swr: 4.0, sgRate: 12.0, cashReturn: 4.0
+  },
+  homebuyer: {
+    name: 'Future Home Buyer (Buy at 38)',
+    currentAge: 32, retirementAge: 55, status: 'single', homeowner: 'no',
+    grossSalary: 115000, extraConcessional: 0, carryForwardCap: 0, extraNonConcessional: 0,
+    hasHECS: false, privateHealth: true, salaryGrowth: true,
+    superBalance: 70000, investBalance: 90000, cashBalance: 40000,
+    currentExpenses: 62000, leanExpenses: 34000, baristaExpenses: 55000, baristaIncome: 25000, fullExpenses: 72000,
+    baristaStopAge: 65, slowGoPct: 0, slowGoAge: 75, includeAgePension: true,
+    windfallAmount: 0, oneOffAmount: 0,
+    planHousePurchase: true, houseDeposit: 100000, houseBuyAge: 38, mortgageAmount: 550000, rentSaving: 28000, mortgageRate: 6.0, mortgageTerm: 30, extraRepaymentPct: 15,
+    investReturn: 7.0, superReturn: 7.5, taxableShare: 50, retVol: 12, inflation: 3.0, swr: 4.0, sgRate: 12.0, cashReturn: 4.0
+  }
+};
+
+function applyPreset(key) {
+  const preset = PRESETS[key];
+  if (!preset) return;
+
+  document.querySelectorAll('.preset-pill').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('onclick')?.includes(`'${key}'`));
+  });
+
+  applyFormValues(preset);
+  updateRangeLabels();
+  initRanges();
+  updateCoupleUI(preset.status === 'couple');
+  updateConditionalUI();
+  calc();
+  showToast(`Loaded preset: <b>${preset.name}</b>`, 'success', '⚡');
+}
+
 function applyFormValues(vals) {
   Object.entries(vals).forEach(([id, val]) => {
     const el = document.getElementById(id);
@@ -739,6 +883,9 @@ function applyFormValues(vals) {
         if (!isNaN(num) && el.max && num > parseFloat(el.max)) val = el.max;
       }
       el.value = val;
+    }
+    if (id === 'status' || id === 'homeowner') {
+      updateSegmentedUI(id, val);
     }
   });
 }
@@ -781,27 +928,25 @@ function shareLink() {
     p.set(el.id, el.type === 'checkbox' ? (el.checked ? '1' : '0') : el.value);
   });
   const url = location.origin + location.pathname + '?' + p.toString();
-  const btn = document.getElementById('share-btn');
-  const done = () => {
-    if (!btn) return;
-    const orig = btn.textContent;
-    btn.textContent = '✓';
-    setTimeout(() => { btn.textContent = orig; }, 1500);
-  };
-  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(url).then(done, () => prompt('Copy this link:', url));
-  else prompt('Copy this link:', url);
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(url).then(() => {
+      showToast('Shareable link copied to clipboard!', 'success', '🔗');
+    }, () => prompt('Copy this link:', url));
+  } else {
+    prompt('Copy this link:', url);
+  }
 }
 
 function copyAuditLogs() {
-  if (!window._lastAuditLog) return alert('No logs generated yet.');
+  if (!window._lastAuditLog) return showToast('No logs generated yet.', 'info', '📋');
   if (navigator.clipboard?.writeText) {
     navigator.clipboard.writeText(window._lastAuditLog).then(() => {
-      alert('✅ Diagnostic audit logs copied to clipboard!');
+      showToast('Diagnostic audit logs copied to clipboard!', 'success', '📋');
     }).catch(() => {
-      prompt('Your browser blocked clipboard access. Copy the logs here:', window._lastAuditLog);
+      prompt('Your browser blocked clipboard access. Copy logs here:', window._lastAuditLog);
     });
   } else {
-    prompt('Copy the logs here:', window._lastAuditLog);
+    prompt('Copy logs here:', window._lastAuditLog);
   }
 }
 
@@ -835,6 +980,7 @@ function exportCSV() {
   a.download = 'fire-projection.csv';
   a.click();
   URL.revokeObjectURL(a.href);
+  showToast('Projection table exported to CSV!', 'success', '⬇️');
 }
 
 // ══════════════════════════════════════════════════════════
@@ -847,9 +993,11 @@ function toggleDark() {
   const dark = document.body.classList.toggle('dark');
   localStorage.setItem('au-fire-dark', dark ? '1' : '0');
   document.cookie = `au-fire-dark=${dark ? '1' : '0'}; max-age=31536000; path=/; SameSite=Strict`;
-  document.getElementById('dark-toggle').textContent = dark ? '☀️' : '🌙';
-  Chart.defaults.color = dark ? '#9CA3AF' : '#718096';
+  const icon = document.getElementById('dark-icon');
+  if (icon) icon.textContent = dark ? '🌙' : '☀️';
+  Chart.defaults.color = dark ? '#94A3B8' : '#64748B';
   _calc();
+  showToast(dark ? 'Obsidian Dark theme activated' : 'Frost Light theme activated', 'info', dark ? '🌙' : '☀️');
 }
 
 function initDark() {
@@ -858,13 +1006,17 @@ function initDark() {
   if (cookieMatch) darkStr = cookieMatch[2];
   if (!darkStr) darkStr = localStorage.getItem('au-fire-dark');
 
-  const dark = darkStr === '1';
+  // Default to dark mode for sleek luxury aesthetic if not set
+  const dark = darkStr === null ? true : darkStr === '1';
   if (dark) {
     document.body.classList.add('dark');
-    Chart.defaults.color = '#9CA3AF';
+    Chart.defaults.color = '#94A3B8';
+  } else {
+    document.body.classList.remove('dark');
+    Chart.defaults.color = '#64748B';
   }
-  const btn = document.getElementById('dark-toggle');
-  if (btn) btn.textContent = dark ? '☀️' : '🌙';
+  const icon = document.getElementById('dark-icon');
+  if (icon) icon.textContent = dark ? '🌙' : '☀️';
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1314,6 +1466,10 @@ function renderHero(inp, result, mc, warnings) {
 
   const mortgageChip = m.mortgagePaidAge != null
     ? `<span class="chip">🏠 Mortgage-free at <b>${m.mortgagePaidAge}</b></span>` : '';
+
+  if (m.fullAge != null && m.fullAge <= inp.currentAge) {
+    triggerMilestoneConfetti();
+  }
 
   el.innerHTML = `
     <div class="hero-kicker">${kicker}</div>
@@ -2193,7 +2349,11 @@ document.addEventListener('DOMContentLoaded', () => {
   initRanges();
   initUX();
   updateRangeLabels();
-  updateCoupleUI(document.getElementById('status').value === 'couple');
+  const statusVal = document.getElementById('status')?.value || 'single';
+  const homeownerVal = document.getElementById('homeowner')?.value || 'yes';
+  updateSegmentedUI('status', statusVal);
+  updateSegmentedUI('homeowner', homeownerVal);
+  updateCoupleUI(statusVal === 'couple');
   updateConditionalUI();
   calc();
 });

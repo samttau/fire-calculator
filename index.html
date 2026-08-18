@@ -3,96 +3,202 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="An advanced Australian FIRE Calculator focusing on Tax & Superannuation, utilizing current legislative rates.">
-  <title>🇦🇺 Australian FIRE Calculator</title>
+  <meta name="description" content="State-of-the-art Australian FIRE Calculator. Models Australian income tax, Medicare, HECS/HELP repayments, Superannuation guarantee, concessional caps, Age Pension means testing, and couples planning with FY 2025-26 rules.">
+  <title>🔥 Australian FIRE Calculator | Tax &amp; Super Edition</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔥</text></svg>">
+  
+  <!-- Modern Typography Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Stylesheet -->
   <link rel="stylesheet" href="style.css">
+  
+  <!-- Chart.js & Confetti -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
 </head>
-<body>
+<body class="dark">
 
+<!-- Ambient Background Glows -->
+<div class="ambient-glow glow-1" aria-hidden="true"></div>
+<div class="ambient-glow glow-2" aria-hidden="true"></div>
+
+<!-- Toast Notification Container -->
+<div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+<!-- ═══════════════════════════════════════ HEADER -->
 <header>
   <div class="header-inner">
     <div class="header-brand">
-      <div class="header-icon">🇦🇺</div>
-      <div>
-        <h1>Australian FIRE Calculator</h1>
-        <p>Tax &amp; Superannuation Edition · FY 2025–26 rates</p>
+      <div class="brand-badge-icon">
+        <span class="fire-flame">🔥</span>
+      </div>
+      <div class="brand-text">
+        <div class="brand-title-wrap">
+          <h1>Australian FIRE Calculator</h1>
+          <span class="badge-tag live-tag">FY 2025–26 Rules</span>
+        </div>
+        <p>Aussie Tax &amp; Superannuation Engine &bull; ATO Rates &bull; Couple &amp; Single Modelling</p>
       </div>
     </div>
+
+    <!-- Quick Scenario Presets Strip in Header / Top Bar -->
+    <div class="header-center">
+      <div class="preset-strip">
+        <span class="preset-label">⚡ Scenarios:</span>
+        <div class="preset-pills">
+          <button type="button" class="preset-pill active" onclick="applyPreset('standard')" title="Avg Australian salary $95k, 35yo, single">🇦🇺 Aussie Avg</button>
+          <button type="button" class="preset-pill" onclick="applyPreset('tech')" title="High tech earner $180k, salary sacrifice, 30yo">🚀 High Earner</button>
+          <button type="button" class="preset-pill" onclick="applyPreset('couple')" title="Combined $220k couple, age 35 &amp; 32">👫 Power Couple</button>
+          <button type="button" class="preset-pill" onclick="applyPreset('barista')" title="Semi-retirement with casual income">☕ Barista FIRE</button>
+          <button type="button" class="preset-pill" onclick="applyPreset('homebuyer')" title="Buying property at 38 with mortgage">🏡 Home Buyer</button>
+        </div>
+      </div>
+    </div>
+
     <div class="header-right">
       <div class="header-pills">
-        <span class="pill lean">Lean FIRE</span>
-        <span class="pill coast">Coast FIRE</span>
-        <span class="pill barista">Barista FIRE</span>
-        <span class="pill full">Full FIRE</span>
+        <span class="pill lean"><span class="pill-dot"></span>Lean FIRE</span>
+        <span class="pill coast"><span class="pill-dot"></span>Coast FIRE</span>
+        <span class="pill barista"><span class="pill-dot"></span>Barista FIRE</span>
+        <span class="pill full"><span class="pill-dot"></span>Full FIRE</span>
       </div>
       <div class="header-controls">
-        <button class="ctrl-btn" onclick="copyAuditLogs()" title="Copy diagnostic audit logs to clipboard">📋</button>
-        <button class="ctrl-btn" id="share-btn" onclick="shareLink()" title="Copy a shareable link with your current inputs">🔗</button>
-        <button class="ctrl-btn" id="dark-toggle" onclick="toggleDark()" title="Toggle dark mode">🌙</button>
-        <button class="ctrl-btn" onclick="resetDefaults()" title="Reset all inputs to defaults">↺</button>
+        <button class="ctrl-btn" onclick="copyAuditLogs()" title="Copy diagnostic audit logs to clipboard" aria-label="Copy logs">
+          <span class="btn-icon">📋</span>
+          <span class="btn-text">Audit</span>
+        </button>
+        <button class="ctrl-btn" id="share-btn" onclick="shareLink()" title="Copy a shareable link with current scenario" aria-label="Share scenario">
+          <span class="btn-icon">🔗</span>
+          <span class="btn-text">Share</span>
+        </button>
+        <button class="ctrl-btn" id="dark-toggle" onclick="toggleDark()" title="Toggle dark/light theme" aria-label="Toggle theme">
+          <span class="btn-icon" id="dark-icon">🌙</span>
+        </button>
+        <button class="ctrl-btn reset-btn" onclick="resetDefaults()" title="Reset all inputs to default settings" aria-label="Reset">
+          <span class="btn-icon">↺</span>
+        </button>
       </div>
     </div>
   </div>
 </header>
 
+<!-- Mobile Navigation Tabs (visible only on small screens) -->
+<div class="mobile-nav-bar" id="mobile-nav-bar">
+  <button type="button" class="mobile-tab-btn active" id="mob-tab-inputs" onclick="switchMobileTab('inputs')">
+    <span class="tab-icon">⚙️</span>
+    <span>Inputs &amp; Profile</span>
+  </button>
+  <button type="button" class="mobile-tab-btn" id="mob-tab-results" onclick="switchMobileTab('results')">
+    <span class="tab-icon">📊</span>
+    <span>Dashboard &amp; Charts</span>
+  </button>
+</div>
+
 <div class="app">
 
   <!-- ═══════════════════════════════════════ INPUT PANEL -->
-  <aside class="input-panel">
+  <aside class="input-panel" id="input-panel">
+
+    <div class="panel-header-badge">
+      <span>🎛️ Simulation Parameters</span>
+      <span class="panel-badge-sub">Real-time sync</span>
+    </div>
 
     <!-- Profile -->
     <div class="section" id="sec-profile">
       <div class="section-header" onclick="toggleSection('sec-profile')">
-        <span class="section-icon">👤</span>
-        <h3>Your Profile</h3>
+        <div class="section-title-wrap">
+          <span class="section-icon-box icon-purple">👤</span>
+          <div>
+            <h3>Your Profile</h3>
+            <span class="section-subtext">Ages, relationship &amp; housing</span>
+          </div>
+        </div>
         <span class="section-chevron">▾</span>
       </div>
       <div class="section-content">
         <div class="field">
-          <label>Current Age <span class="val" id="lbl-age">35</span></label>
-          <input type="range" id="currentAge" min="18" max="70" value="35" aria-label="Current age"
-            oninput="syncRange(this,'lbl-age','','');calc()">
+          <label>
+            <span class="field-name">Current Age</span>
+            <span class="val-badge" id="lbl-age">35</span>
+          </label>
+          <div class="slider-container">
+            <input type="range" id="currentAge" min="18" max="70" value="35" aria-label="Current age"
+              oninput="syncRange(this,'lbl-age','','');calc()">
+          </div>
         </div>
         <div class="field">
-          <label>Target Retirement Age <span class="val" id="lbl-retire">55</span></label>
-          <input type="range" id="retirementAge" min="30" max="75" value="55" aria-label="Target retirement age"
-            oninput="syncRange(this,'lbl-retire','','');calc()">
+          <label>
+            <span class="field-name">Target Retirement Age</span>
+            <span class="val-badge highlight-purple" id="lbl-retire">55</span>
+          </label>
+          <div class="slider-container">
+            <input type="range" id="retirementAge" min="30" max="75" value="55" aria-label="Target retirement age"
+              oninput="syncRange(this,'lbl-retire','','');calc()">
+          </div>
         </div>
+
         <div class="input-row">
           <div class="field">
-            <label>Status</label>
-            <select id="status" onchange="updateCoupleUI(this.value==='couple');calc()">
-              <option value="single">Single</option>
+            <label class="field-title-simple">Household Status</label>
+            <div class="segmented-control" id="status-segmented">
+              <button type="button" class="seg-btn active" data-val="single" onclick="setSegmented('status', 'single')">Single</button>
+              <button type="button" class="seg-btn" data-val="couple" onclick="setSegmented('status', 'couple')">Couple</button>
+            </div>
+            <select id="status" style="display:none;" onchange="updateCoupleUI(this.value==='couple');calc()">
+              <option value="single" selected>Single</option>
               <option value="couple">Couple</option>
             </select>
           </div>
+
           <div class="field">
-            <label>Homeowner?</label>
-            <select id="homeowner" oninput="calc()">
-              <option value="yes">Yes</option>
+            <label class="field-title-simple">Homeowner?</label>
+            <div class="segmented-control" id="homeowner-segmented">
+              <button type="button" class="seg-btn active" data-val="yes" onclick="setSegmented('homeowner', 'yes')">Yes</button>
+              <button type="button" class="seg-btn" data-val="no" onclick="setSegmented('homeowner', 'no')">No</button>
+            </div>
+            <select id="homeowner" style="display:none;" oninput="calc()">
+              <option value="yes" selected>Yes</option>
               <option value="no">No</option>
             </select>
           </div>
         </div>
 
         <!-- Partner age fields — shown only when Couple is selected -->
-        <div id="partner-profile-fields" style="display:none">
-          <div class="partner-divider">👫 Partner Ages</div>
-          <div class="field">
-            <label>Partner's Current Age <span class="val" id="lbl-partner-age">32</span></label>
-            <input type="range" id="partnerAge" min="18" max="70" value="32" aria-label="Partner's current age"
-              oninput="syncRange(this,'lbl-partner-age','','');calc()">
+        <div id="partner-profile-fields" class="partner-subpanel" style="display:none">
+          <div class="partner-divider">
+            <span>👫 Partner Profile</span>
           </div>
           <div class="field">
-            <label>Partner's Target Retirement Age <span class="val" id="lbl-partner-retire">55</span></label>
-            <input type="range" id="partnerRetirementAge" min="30" max="75" value="55" aria-label="Partner's target retirement age"
-              oninput="syncRange(this,'lbl-partner-retire','','');calc()">
+            <label>
+              <span class="field-name">Partner's Current Age</span>
+              <span class="val-badge" id="lbl-partner-age">32</span>
+            </label>
+            <div class="slider-container">
+              <input type="range" id="partnerAge" min="18" max="70" value="32" aria-label="Partner's current age"
+                oninput="syncRange(this,'lbl-partner-age','','');calc()">
+            </div>
           </div>
           <div class="field">
-            <label>Partner's Gross Annual Salary
-              <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Partner's total before-tax salary. Leave at $0 for a non-working partner — their super and investments still count.</span></div>
+            <label>
+              <span class="field-name">Partner's Target Retirement Age</span>
+              <span class="val-badge highlight-blue" id="lbl-partner-retire">55</span>
+            </label>
+            <div class="slider-container">
+              <input type="range" id="partnerRetirementAge" min="30" max="75" value="55" aria-label="Partner's target retirement age"
+                oninput="syncRange(this,'lbl-partner-retire','','');calc()">
+            </div>
+          </div>
+          <div class="field">
+            <label>
+              <span class="field-name">Partner's Gross Annual Salary</span>
+              <div class="tooltip-wrap">
+                <span class="tooltip-icon" tabindex="0">?</span>
+                <span class="tooltip-text">Partner's total before-tax salary. Leave at $0 for a non-working partner — their super and investments still count.</span>
+              </div>
             </label>
             <div class="input-prefix"><span>$</span><input type="number" id="partnerSalary" value="0" min="0" step="1000" oninput="calc()"></div>
           </div>
@@ -100,137 +206,199 @@
       </div>
     </div>
 
-    <!-- Income -->
+    <!-- Income & Super -->
     <div class="section" id="sec-income">
       <div class="section-header" onclick="toggleSection('sec-income')">
-        <span class="section-icon">💼</span>
-        <h3>Income &amp; Super</h3>
+        <div class="section-title-wrap">
+          <span class="section-icon-box icon-emerald">💼</span>
+          <div>
+            <h3>Income &amp; Super</h3>
+            <span class="section-subtext">Salary, sacrifice, HECS, MLS</span>
+          </div>
+        </div>
         <span class="section-chevron">▾</span>
       </div>
       <div class="section-content">
         <div class="field">
-          <label>Gross Annual Salary
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Your total before-tax salary. Exclude super guarantee (SGC) as it's added on top.</span></div>
+          <label>
+            <span class="field-name">Gross Annual Salary</span>
+            <div class="tooltip-wrap">
+              <span class="tooltip-icon" tabindex="0">?</span>
+              <span class="tooltip-text">Your total before-tax salary. Exclude super guarantee (SGC) as it's added on top by your employer.</span>
+            </div>
           </label>
           <div class="input-prefix"><span>$</span><input type="number" id="grossSalary" value="95000" min="0" step="1000" oninput="calc()"></div>
         </div>
+        
         <div class="field">
-          <label>Salary Sacrifice to Super (extra)
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Additional pre-tax contributions beyond the 12% SG. Reduces taxable income. Annual concessional cap is $30,000 (includes employer SG).</span></div>
+          <label>
+            <span class="field-name">Salary Sacrifice to Super (extra)</span>
+            <div class="tooltip-wrap">
+              <span class="tooltip-icon" tabindex="0">?</span>
+              <span class="tooltip-text">Additional pre-tax contributions beyond 12% SG. Reduces taxable income. Concessional cap is $30,000/yr (includes employer SG).</span>
+            </div>
           </label>
           <div class="input-prefix"><span>$</span><input type="number" id="extraConcessional" value="0" step="500" oninput="calc()"></div>
           <div class="cap-warning" id="cap-warning">⚠ Exceeds concessional cap of $30,000/yr (including employer SG)</div>
         </div>
+
         <div class="field">
-          <label>Unused Carry-Forward Cap
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Unused concessional limits from the past 5 years. The calculator will consume this before applying the standard $30k cap. Requires a super balance under $500k.</span></div>
+          <label>
+            <span class="field-name">Unused Carry-Forward Cap</span>
+            <div class="tooltip-wrap">
+              <span class="tooltip-icon" tabindex="0">?</span>
+              <span class="tooltip-text">Unused concessional limits from the past 5 years. Consumed before standard $30k cap. Requires total super balance under $500k.</span>
+            </div>
           </label>
           <div class="input-prefix"><span>$</span><input type="number" id="carryForwardCap" value="0" step="1000" oninput="calc()"></div>
         </div>
+
         <div class="field">
-          <label>After-Tax Super Contributions
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Non-concessional contributions (after-tax money into super). Annual cap: $120,000 or up to $360,000 via bring-forward rule.</span></div>
+          <label>
+            <span class="field-name">After-Tax Super Contributions</span>
+            <div class="tooltip-wrap">
+              <span class="tooltip-icon" tabindex="0">?</span>
+              <span class="tooltip-text">Non-concessional contributions (after-tax money into super). Annual cap: $120,000 (or bring-forward up to $360,000).</span>
+            </div>
           </label>
           <div class="input-prefix"><span>$</span><input type="number" id="extraNonConcessional" value="0" step="500" oninput="calc()"></div>
         </div>
+
         <div class="toggle-row">
-          <span class="toggle-label">Has HECS/HELP debt
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">2025–26 marginal repayment system: 15c per $ over $67,000 (17c over $125,000). Repayment income includes salary sacrifice. Repayments stop once the balance is paid off.</span></div>
-          </span>
+          <div class="toggle-label-wrap">
+            <span class="toggle-label">Has HECS / HELP debt</span>
+            <div class="tooltip-wrap">
+              <span class="tooltip-icon" tabindex="0">?</span>
+              <span class="tooltip-text">2025–26 marginal repayment system: 15c per $ over $67,000 (17c over $125,000). Repayments stop once paid off.</span>
+            </div>
+          </div>
           <label class="toggle"><input type="checkbox" id="hasHECS" onchange="toggleVis('hecs-balance-field', this.checked);calc()"><span class="toggle-slider"></span></label>
         </div>
+
         <div class="field" id="hecs-balance-field" style="display:none">
-          <label>HECS/HELP Balance Remaining</label>
+          <label><span class="field-name">HECS / HELP Balance Remaining</span></label>
           <div class="input-prefix"><span>$</span><input type="number" id="hecsBalance" value="30000" min="0" step="1000" oninput="calc()"></div>
-          <div class="hint">Repayments continue until this is paid off, then take-home pay rises</div>
+          <div class="hint">Repayments continue until paid off, then take-home pay automatically rises.</div>
         </div>
+
         <div class="toggle-row">
-          <span class="toggle-label">Has private hospital cover
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Without private hospital cover, the Medicare Levy Surcharge (1–1.5%) applies above $101,000 single / $202,000 family income.</span></div>
-          </span>
+          <div class="toggle-label-wrap">
+            <span class="toggle-label">Has private hospital cover</span>
+            <div class="tooltip-wrap">
+              <span class="tooltip-icon" tabindex="0">?</span>
+              <span class="tooltip-text">Without private hospital cover, Medicare Levy Surcharge (1–1.5%) applies above $101,000 single / $202,000 family income.</span>
+            </div>
+          </div>
           <label class="toggle"><input type="checkbox" id="privateHealth" checked oninput="calc()"><span class="toggle-slider"></span></label>
         </div>
+
         <div class="toggle-row">
-          <span class="toggle-label">Salary grows with inflation</span>
+          <div class="toggle-label-wrap">
+            <span class="toggle-label">Salary grows with inflation</span>
+          </div>
           <label class="toggle"><input type="checkbox" id="salaryGrowth" checked oninput="calc()"><span class="toggle-slider"></span></label>
         </div>
 
         <!-- Partner income — shown only when Couple is selected -->
-        <div id="partner-income-fields" style="display:none">
-          <div class="partner-divider">👫 Partner Super &amp; Tax</div>
+        <div id="partner-income-fields" class="partner-subpanel" style="display:none">
+          <div class="partner-divider">
+            <span>👫 Partner Super &amp; Tax</span>
+          </div>
           <div class="field">
-            <label>Partner's Salary Sacrifice to Super</label>
+            <label><span class="field-name">Partner's Salary Sacrifice to Super</span></label>
             <div class="input-prefix"><span>$</span><input type="number" id="partnerExtraConcessional" value="0" min="0" step="500" oninput="calc()"></div>
             <div class="cap-warning" id="p-cap-warning">⚠ Exceeds partner's concessional cap of $30,000/yr (including employer SG)</div>
           </div>
           <div class="field">
-            <label>Partner's Unused Carry-Forward Cap</label>
+            <label><span class="field-name">Partner's Unused Carry-Forward Cap</span></label>
             <div class="input-prefix"><span>$</span><input type="number" id="partnerCarryForwardCap" value="0" min="0" step="1000" oninput="calc()"></div>
           </div>
           <div class="toggle-row">
-            <span class="toggle-label">Partner has HECS/HELP debt</span>
+            <div class="toggle-label-wrap">
+              <span class="toggle-label">Partner has HECS / HELP debt</span>
+            </div>
             <label class="toggle"><input type="checkbox" id="partnerHasHECS" onchange="toggleVis('p-hecs-balance-field', this.checked);calc()"><span class="toggle-slider"></span></label>
           </div>
           <div class="field" id="p-hecs-balance-field" style="display:none">
-            <label>Partner's HECS/HELP Balance</label>
+            <label><span class="field-name">Partner's HECS / HELP Balance</span></label>
             <div class="input-prefix"><span>$</span><input type="number" id="partnerHecsBalance" value="30000" min="0" step="1000" oninput="calc()"></div>
           </div>
           <div class="field">
-            <label>Direct your extra contributions to
-              <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Where your salary sacrifice and after-tax contributions land (via contribution splitting / spouse contributions). Routing to an older partner unlocks the money sooner; to a younger partner it stays Age-Pension-exempt for longer.</span></div>
+            <label>
+              <span class="field-name">Direct extra contributions to</span>
+              <div class="tooltip-wrap">
+                <span class="tooltip-icon" tabindex="0">?</span>
+                <span class="tooltip-text">Where your salary sacrifice lands (spouse splitting). Routing to older partner unlocks money sooner; younger partner stays pension-exempt longer.</span>
+              </div>
             </label>
-            <select id="contribTarget" onchange="calc()">
+            <select id="contribTarget" class="styled-select" onchange="calc()">
               <option value="mine">Your super</option>
               <option value="partner">Partner's super</option>
-              <option value="split">Split evenly</option>
+              <option value="split">Split evenly 50/50</option>
             </select>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Current Position -->
+    <!-- Current Wealth -->
     <div class="section" id="sec-wealth">
       <div class="section-header" onclick="toggleSection('sec-wealth')">
-        <span class="section-icon">🏦</span>
-        <h3>Current Wealth</h3>
+        <div class="section-title-wrap">
+          <span class="section-icon-box icon-amber">🏦</span>
+          <div>
+            <h3>Current Wealth</h3>
+            <span class="section-subtext">Super, investments, cash balances</span>
+          </div>
+        </div>
         <span class="section-chevron">▾</span>
       </div>
       <div class="section-content">
         <div class="field">
-          <label>Super Balance</label>
+          <label><span class="field-name">Super Balance</span></label>
           <div class="input-prefix"><span>$</span><input type="number" id="superBalance" value="85000" step="1000" oninput="calc()"></div>
         </div>
         <div class="field">
-          <label>Your Investment Portfolio
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Shares, ETFs, managed funds, etc. outside superannuation.</span></div>
+          <label>
+            <span class="field-name">Your Investment Portfolio</span>
+            <div class="tooltip-wrap">
+              <span class="tooltip-icon" tabindex="0">?</span>
+              <span class="tooltip-text">Shares, ETFs, index funds, non-super taxable portfolios.</span>
+            </div>
           </label>
           <div class="input-prefix"><span>$</span><input type="number" id="investBalance" value="30000" step="1000" oninput="calc()"></div>
         </div>
         <div class="field">
-          <label>Your Cash &amp; Savings</label>
+          <label><span class="field-name">Your Cash &amp; Savings</span></label>
           <div class="input-prefix"><span>$</span><input type="number" id="cashBalance" value="20000" step="1000" oninput="calc()"></div>
         </div>
-        <div id="partner-wealth-fields" style="display:none">
-          <div class="partner-divider">👫 Partner's Wealth</div>
+
+        <div id="partner-wealth-fields" class="partner-subpanel" style="display:none">
+          <div class="partner-divider">
+            <span>👫 Partner's Wealth</span>
+          </div>
           <div class="field">
-            <label>Partner's Super Balance</label>
+            <label><span class="field-name">Partner's Super Balance</span></label>
             <div class="input-prefix"><span>$</span><input type="number" id="partnerSuperBalance" value="0" step="1000" oninput="calc()"></div>
           </div>
           <div class="field">
-            <label>Partner's Investment Portfolio</label>
+            <label><span class="field-name">Partner's Investment Portfolio</span></label>
             <div class="input-prefix"><span>$</span><input type="number" id="partnerInvestBalance" value="0" step="1000" oninput="calc()"></div>
           </div>
           <div class="field">
-            <label>Partner's Cash &amp; Savings</label>
+            <label><span class="field-name">Partner's Cash &amp; Savings</span></label>
             <div class="input-prefix"><span>$</span><input type="number" id="partnerCashBalance" value="0" step="1000" oninput="calc()"></div>
           </div>
           <div class="field">
-            <label>Taxable investments held by
-              <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Whose name the (non-super) portfolio is in. Holding it in the lower earner's name cuts tax on investment income — often to zero for a non-working partner.</span></div>
+            <label>
+              <span class="field-name">Taxable investments held by</span>
+              <div class="tooltip-wrap">
+                <span class="tooltip-icon" tabindex="0">?</span>
+                <span class="tooltip-text">Whose name the taxable portfolio is under. Lower earner's name minimizes annual tax on dividends.</span>
+              </div>
             </label>
-            <select id="investHolder" onchange="calc()">
-              <option value="lower">Lower earner (tax-smart)</option>
+            <select id="investHolder" class="styled-select" onchange="calc()">
+              <option value="lower">Lower earner (tax-optimized)</option>
               <option value="higher">Higher earner</option>
               <option value="split">Split 50/50</option>
             </select>
@@ -242,59 +410,100 @@
     <!-- Retirement Goals -->
     <div class="section" id="sec-goals">
       <div class="section-header" onclick="toggleSection('sec-goals')">
-        <span class="section-icon">🎯</span>
-        <h3>Retirement Goals</h3>
+        <div class="section-title-wrap">
+          <span class="section-icon-box icon-rose">🎯</span>
+          <div>
+            <h3>Retirement Goals</h3>
+            <span class="section-subtext">Annual expenses &amp; FIRE thresholds</span>
+          </div>
+        </div>
         <span class="section-chevron">▾</span>
       </div>
       <div class="section-content">
-        <div class="expenses-note">All expense figures are <strong>total household</strong> — the combined spending for your entire household, whether single or couple.</div>
+        <div class="expenses-note">
+          <span class="note-icon">💡</span>
+          <span>All expenses are <strong>total household</strong> (combined living costs in today's dollars).</span>
+        </div>
+
         <div class="field">
-          <label>Current Annual Expenses <span class="field-tag hh-tag">household total</span></label>
+          <label>
+            <span class="field-name">Current Annual Expenses <span class="field-tag hh-tag">household total</span></span>
+          </label>
           <div class="input-prefix"><span>$</span><input type="number" id="currentExpenses" value="60000" step="1000" oninput="calc()"></div>
-          <div class="hint">Everything your household spends now, in today's dollars</div>
+          <div class="hint">What you spend right now each year in today's dollars.</div>
         </div>
+
         <div class="field">
-          <label><span style="color:var(--lean);font-weight:700;">🔴 Lean FIRE</span> Annual Expenses <span class="field-tag hh-tag">household total</span></label>
+          <label>
+            <span class="field-name"><span class="color-dot dot-lean"></span>Lean FIRE Expenses <span class="field-tag hh-tag">household total</span></span>
+          </label>
           <div class="input-prefix"><span>$</span><input type="number" id="leanExpenses" value="32000" step="500" oninput="calc()"></div>
-          <div class="hint">Bare essentials for the whole household — budget travel, minimal luxuries</div>
+          <div class="hint">Bare essentials — basic living, minimal luxuries.</div>
         </div>
+
         <div class="field">
-          <label><span style="color:var(--barista);font-weight:700;">🟢 Barista FIRE</span> Annual Expenses <span class="field-tag hh-tag">household total</span></label>
+          <label>
+            <span class="field-name"><span class="color-dot dot-barista"></span>Barista FIRE Expenses <span class="field-tag hh-tag">household total</span></span>
+          </label>
           <div class="input-prefix"><span>$</span><input type="number" id="baristaExpenses" value="55000" step="500" oninput="calc()"></div>
         </div>
+
         <div class="field">
-          <label><span style="color:var(--barista);font-weight:700;">🟢 Barista</span> Part-Time Income <span class="field-tag">one person</span></label>
+          <label>
+            <span class="field-name"><span class="color-dot dot-barista"></span>Barista Part-Time Income <span class="field-tag">one person</span></span>
+          </label>
           <div class="input-prefix"><span>$</span><input type="number" id="baristaIncome" value="25000" step="500" oninput="calc()"></div>
-          <div class="hint">Income from casual / part-time work (one semi-retired person)</div>
+          <div class="hint">Casual/consulting earnings during semi-retirement.</div>
         </div>
+
         <div class="field">
-          <label><span style="color:var(--full);font-weight:700;">🟣 Full FIRE</span> Annual Expenses <span class="field-tag hh-tag">household total</span></label>
+          <label>
+            <span class="field-name"><span class="color-dot dot-full"></span>Full FIRE Expenses <span class="field-tag hh-tag">household total</span></span>
+          </label>
           <div class="input-prefix"><span>$</span><input type="number" id="fullExpenses" value="70000" step="500" oninput="calc()"></div>
-          <div class="hint">Comfortable retirement lifestyle for the whole household, today's dollars</div>
+          <div class="hint">Comfortable, dream retirement lifestyle for the household.</div>
         </div>
+
         <div class="field">
-          <label>Stop part-time (Barista) work at age
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Age when part-time work ends in Barista FIRE. The Barista target is reduced by the value of part-time income earned between now and this age, so it shrinks the later you start.</span></div>
+          <label>
+            <span class="field-name">Stop part-time (Barista) work at age</span>
+            <div class="tooltip-wrap">
+              <span class="tooltip-icon" tabindex="0">?</span>
+              <span class="tooltip-text">Age when part-time work ends in Barista FIRE.</span>
+            </div>
           </label>
           <input type="number" id="baristaStopAge" value="65" min="40" max="80" step="1" oninput="calc()">
-          <div class="hint">Typically when you want to fully stop working, e.g. 65</div>
+          <div class="hint">When you transition to 100% leisure (e.g. 65).</div>
         </div>
+
         <div class="field">
-          <label>Later-life spending reduction
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Real spending typically falls in later retirement (the "slow-go" years). This reduces annual expenses from the chosen age. Leave at 0% to keep spending flat to 90.</span></div>
-            <span class="val" id="lbl-slow">0%</span>
+          <label>
+            <span class="field-name">Later-life spending reduction</span>
+            <div class="tooltip-wrap">
+              <span class="tooltip-icon" tabindex="0">?</span>
+              <span class="tooltip-text">Real spending typically drops in later years ("slow-go" phase). Set to 0% to keep flat.</span>
+            </div>
+            <span class="val-badge" id="lbl-slow">0%</span>
           </label>
-          <input type="range" id="slowGoPct" min="0" max="40" step="5" value="0" aria-label="Later-life spending reduction percent"
-            oninput="syncRange(this,'lbl-slow','','%');calc()">
+          <div class="slider-container">
+            <input type="range" id="slowGoPct" min="0" max="40" step="5" value="0" aria-label="Later-life spending reduction percent"
+              oninput="syncRange(this,'lbl-slow','','%');calc()">
+          </div>
         </div>
+
         <div class="field">
-          <label>…reduce spending from age</label>
+          <label><span class="field-name">…reduce spending from age</span></label>
           <input type="number" id="slowGoAge" value="75" min="60" max="90" step="1" oninput="calc()">
         </div>
+
         <div class="toggle-row">
-          <span class="toggle-label">Include Age Pension (from 67)
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Australian Age Pension — ~$29,900/yr single, ~$45,100/yr couple (2025-26). Subject to assets &amp; income tests.</span></div>
-          </span>
+          <div class="toggle-label-wrap">
+            <span class="toggle-label">Include Age Pension (from 67)</span>
+            <div class="tooltip-wrap">
+              <span class="tooltip-icon" tabindex="0">?</span>
+              <span class="tooltip-text">Australian Age Pension (~$29,900 single / $45,100 couple). Subject to means test.</span>
+            </div>
+          </div>
           <label class="toggle"><input type="checkbox" id="includeAgePension" checked oninput="calc()"><span class="toggle-slider"></span></label>
         </div>
       </div>
@@ -303,84 +512,120 @@
     <!-- Life Events -->
     <div class="section collapsed" id="sec-events">
       <div class="section-header" onclick="toggleSection('sec-events')">
-        <span class="section-icon">📅</span>
-        <h3>Life Events</h3>
+        <div class="section-title-wrap">
+          <span class="section-icon-box icon-sky">📅</span>
+          <div>
+            <h3>Life Events</h3>
+            <span class="section-subtext">Windfalls, house purchase, big expenses</span>
+          </div>
+        </div>
         <span class="section-chevron">▾</span>
       </div>
       <div class="section-content">
-        <div class="expenses-note">One-off events in <strong>today's dollars</strong> — e.g. an inheritance, a house deposit, a sabbatical year.</div>
+        <div class="expenses-note">
+          <span class="note-icon">💡</span>
+          <span>One-off lump sums in today's dollars (inheritance, sabbatical, wedding).</span>
+        </div>
+
         <div class="input-row">
           <div class="field">
-            <label>Windfall amount</label>
+            <label><span class="field-name">Windfall amount</span></label>
             <div class="input-prefix"><span>$</span><input type="number" id="windfallAmount" value="0" min="0" step="5000" oninput="calc()"></div>
           </div>
           <div class="field">
-            <label>…at age</label>
+            <label><span class="field-name">…at age</span></label>
             <input type="number" id="windfallAge" value="50" min="18" max="90" step="1" oninput="calc()">
           </div>
         </div>
+
         <div class="input-row">
           <div class="field">
-            <label>One-off expense</label>
+            <label><span class="field-name">One-off expense</span></label>
             <div class="input-prefix"><span>$</span><input type="number" id="oneOffAmount" value="0" min="0" step="5000" oninput="calc()"></div>
           </div>
           <div class="field">
-            <label>…at age</label>
+            <label><span class="field-name">…at age</span></label>
             <input type="number" id="oneOffAge" value="50" min="18" max="90" step="1" oninput="calc()">
           </div>
         </div>
 
         <!-- House Purchase -->
-        <div class="partner-divider" style="margin-top:12px">🏠 House Purchase</div>
+        <div class="partner-divider" style="margin-top:16px">
+          <span>🏠 House Purchase Model</span>
+        </div>
+        
         <div class="toggle-row">
-          <span class="toggle-label">Plan to buy a house?</span>
+          <div class="toggle-label-wrap">
+            <span class="toggle-label">Plan to buy a house?</span>
+          </div>
           <label class="toggle"><input type="checkbox" id="planHousePurchase" onchange="toggleVis('house-purchase-fields', this.checked);calc()"><span class="toggle-slider"></span></label>
         </div>
-        <div id="house-purchase-fields" style="display:none">
-          <div class="expenses-note" style="margin-top:12px">Models buying a home at a future age: the deposit is drawn from savings (cash then investments — not super), mortgage repayments replace rent in your expense budget, and the property counts as your principal residence (homeowner) from that age onward for Age Pension purposes. Stamp duty and other purchase costs aren't added automatically — fold them into the deposit or mortgage amount. Property appreciation and ongoing costs (rates, insurance, maintenance) beyond the mortgage/rent swap aren't modelled.</div>
+
+        <div id="house-purchase-fields" class="partner-subpanel" style="display:none">
+          <div class="expenses-note">
+            <span>Deposit drawn from liquid cash/investments. Mortgage replaces rent, property becomes exempt principal home for Age Pension.</span>
+          </div>
+
           <div class="input-row">
             <div class="field">
-              <label>Deposit
-                <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Upfront cash drawn from your portfolio at the purchase age. Today's dollars.</span></div>
+              <label>
+                <span class="field-name">Deposit</span>
+                <div class="tooltip-wrap">
+                  <span class="tooltip-icon" tabindex="0">?</span>
+                  <span class="tooltip-text">Cash drawn from portfolio at purchase age.</span>
+                </div>
               </label>
               <div class="input-prefix"><span>$</span><input type="number" id="houseDeposit" value="0" min="0" step="5000" oninput="calc()"></div>
             </div>
             <div class="field">
-              <label>…at age</label>
+              <label><span class="field-name">…at age</span></label>
               <input type="number" id="houseBuyAge" value="40" min="18" max="85" step="1" oninput="calc()">
             </div>
           </div>
+
           <div class="input-row">
             <div class="field">
-              <label>Mortgage amount
-                <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Amount borrowed. Include stamp duty and other purchase costs here (or in the deposit) if you're not paying them from a separate source — they aren't added automatically. Annual repayments are calculated from this, the interest rate and loan term. Today's dollars.</span></div>
+              <label>
+                <span class="field-name">Mortgage amount</span>
+                <div class="tooltip-wrap">
+                  <span class="tooltip-icon" tabindex="0">?</span>
+                  <span class="tooltip-text">Total loan borrowed. Include stamp duty/costs here if rolled into mortgage.</span>
+                </div>
               </label>
               <div class="input-prefix"><span>$</span><input type="number" id="mortgageAmount" value="0" min="0" step="10000" oninput="calc()"></div>
             </div>
             <div class="field">
-              <label>Rent saved
-                <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Current annual rent included in your expenses that disappears after buying. This is subtracted from expenses and replaced by mortgage repayments. Today's dollars.</span></div>
+              <label>
+                <span class="field-name">Rent saved</span>
+                <div class="tooltip-wrap">
+                  <span class="tooltip-icon" tabindex="0">?</span>
+                  <span class="tooltip-text">Annual rent removed from expenses once bought.</span>
+                </div>
               </label>
               <div class="input-prefix"><span>$</span><input type="number" id="rentSaving" value="0" min="0" step="500" oninput="calc()"></div>
             </div>
           </div>
+
           <div class="input-row">
             <div class="field">
-              <label>Mortgage interest rate (%)</label>
+              <label><span class="field-name">Mortgage Rate (%)</span></label>
               <input type="number" id="mortgageRate" value="6.0" min="1" max="15" step="0.25" oninput="calc()">
             </div>
             <div class="field">
-              <label>Loan term (years)</label>
+              <label><span class="field-name">Term (years)</span></label>
               <input type="number" id="mortgageTerm" value="30" min="5" max="40" step="1" oninput="calc()">
             </div>
           </div>
-          <div class="input-row">
-            <div class="field">
-              <label>Extra repayments (% of yearly savings)
-                <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Redirects this share of each year's leftover savings (after expenses) into extra mortgage repayments instead of investing it, while you're still working. Pays the loan off faster and cuts total interest, at the cost of less invested along the way.</span></div>
-              </label>
-              <input type="number" id="extraRepaymentPct" value="0" min="0" max="100" step="5" oninput="calc()">
-            </div>
+
+          <div class="field">
+            <label>
+              <span class="field-name">Extra repayments (% of yearly savings)</span>
+              <div class="tooltip-wrap">
+                <span class="tooltip-icon" tabindex="0">?</span>
+                <span class="tooltip-text">Redirects this share of leftover annual savings into the loan.</span>
+              </div>
+            </label>
+            <input type="number" id="extraRepaymentPct" value="0" min="0" max="100" step="5" oninput="calc()">
           </div>
           <div class="hint" id="mortgage-repayment-hint" style="margin-top:4px"></div>
         </div>
@@ -390,64 +635,120 @@
     <!-- Assumptions -->
     <div class="section collapsed" id="sec-assumptions">
       <div class="section-header" onclick="toggleSection('sec-assumptions')">
-        <span class="section-icon">⚙️</span>
-        <h3>Advanced Assumptions</h3>
+        <div class="section-title-wrap">
+          <span class="section-icon-box icon-indigo">⚙️</span>
+          <div>
+            <h3>Advanced Assumptions</h3>
+            <span class="section-subtext">Returns, inflation, SWR, volatility</span>
+          </div>
+        </div>
         <span class="section-chevron">▾</span>
       </div>
       <div class="section-content">
         <div class="field">
-          <label>Investment Return (nominal % p.a.) <span class="val" id="lbl-ret">7.0%</span></label>
-          <input type="range" id="investReturn" min="2" max="15" step="0.5" value="7" aria-label="Investment return percent"
-            oninput="syncRange(this,'lbl-ret','','%');calc()">
-        </div>
-        <div class="field">
-          <label>Super Return (nominal % p.a.)
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Enter net of fund fees and the 15% earnings tax. The calculator automatically adds a 1.0% yield boost during drawdown when the balance converts to the tax-free pension phase (up to the $2M cap).</span></div>
-            <span class="val" id="lbl-supret">7.5%</span>
+          <label>
+            <span class="field-name">Investment Return (nominal % p.a.)</span>
+            <span class="val-badge" id="lbl-ret">7.0%</span>
           </label>
-          <input type="range" id="superReturn" min="2" max="15" step="0.5" value="7.5" aria-label="Super return percent"
-            oninput="syncRange(this,'lbl-supret','','%');calc()">
+          <div class="slider-container">
+            <input type="range" id="investReturn" min="2" max="15" step="0.5" value="7" aria-label="Investment return percent"
+              oninput="syncRange(this,'lbl-ret','','%');calc()">
+          </div>
         </div>
+
         <div class="field">
-          <label>Returns taxed as income
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Share of each year's investment return that is assessable income (distributions + realised gains). It's taxed at the holder's actual marginal rate each year — near zero for a non-working partner. Cash interest is always fully assessable. CGT on final sale isn't modelled.</span></div>
-            <span class="val" id="lbl-share">50%</span>
+          <label>
+            <span class="field-name">Super Return (nominal % p.a.)</span>
+            <div class="tooltip-wrap">
+              <span class="tooltip-icon" tabindex="0">?</span>
+              <span class="tooltip-text">Net of fund fees &amp; 15% earnings tax. A 1.0% tax-free boost is automatically added during pension phase.</span>
+            </div>
+            <span class="val-badge" id="lbl-supret">7.5%</span>
           </label>
-          <input type="range" id="taxableShare" min="0" max="100" step="5" value="50" aria-label="Share of investment returns taxed as income"
-            oninput="syncRange(this,'lbl-share','','%');calc()">
+          <div class="slider-container">
+            <input type="range" id="superReturn" min="2" max="15" step="0.5" value="7.5" aria-label="Super return percent"
+              oninput="syncRange(this,'lbl-supret','','%');calc()">
+          </div>
         </div>
+
         <div class="field">
-          <label>Return volatility (std dev % p.a.)
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Drives the Monte Carlo simulation: 400 randomised market histories. ~12% suits a diversified portfolio, ~15–18% all-equities. Set to 0 to disable.</span></div>
-            <span class="val" id="lbl-vol">12%</span>
+          <label>
+            <span class="field-name">Returns taxed as income</span>
+            <div class="tooltip-wrap">
+              <span class="tooltip-icon" tabindex="0">?</span>
+              <span class="tooltip-text">Share of investment return taxed as taxable dividend/income each year.</span>
+            </div>
+            <span class="val-badge" id="lbl-share">50%</span>
           </label>
-          <input type="range" id="retVol" min="0" max="25" step="1" value="12" aria-label="Return volatility percent"
-            oninput="syncRange(this,'lbl-vol','','%');calc()">
+          <div class="slider-container">
+            <input type="range" id="taxableShare" min="0" max="100" step="5" value="50" aria-label="Share of investment returns taxed as income"
+              oninput="syncRange(this,'lbl-share','','%');calc()">
+          </div>
         </div>
+
         <div class="field">
-          <label>Inflation Rate (% p.a.) <span class="val" id="lbl-inf">3.0%</span></label>
-          <input type="range" id="inflation" min="1" max="7" step="0.25" value="3" aria-label="Inflation rate percent"
-            oninput="syncRange(this,'lbl-inf','','%');calc()">
-        </div>
-        <div class="field">
-          <label>Safe Withdrawal Rate (%)
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">The % of portfolio withdrawn annually. 4% (the "4% rule") means your FI number = 25× expenses. 3.5% is more conservative.</span></div>
-            <span class="val" id="lbl-swr">4.0%</span>
+          <label>
+            <span class="field-name">Return volatility (std dev % p.a.)</span>
+            <div class="tooltip-wrap">
+              <span class="tooltip-icon" tabindex="0">?</span>
+              <span class="tooltip-text">Drives the 400 Monte Carlo simulation runs. ~12% for diversified, ~16% for 100% equities.</span>
+            </div>
+            <span class="val-badge" id="lbl-vol">12%</span>
           </label>
-          <input type="range" id="swr" min="2" max="6" step="0.25" value="4" aria-label="Safe withdrawal rate percent"
-            oninput="syncRange(this,'lbl-swr','','%');calc()">
+          <div class="slider-container">
+            <input type="range" id="retVol" min="0" max="25" step="1" value="12" aria-label="Return volatility percent"
+              oninput="syncRange(this,'lbl-vol','','%');calc()">
+          </div>
         </div>
+
         <div class="field">
-          <label>Employer SG Rate (%) <span class="val" id="lbl-sg">12.0%</span></label>
-          <input type="range" id="sgRate" min="9" max="15" step="0.5" value="12" aria-label="Employer super guarantee rate percent"
-            oninput="syncRange(this,'lbl-sg','','%');calc()">
-          <div class="hint">12% from 1 Jul 2025, may rise further</div>
+          <label>
+            <span class="field-name">Inflation Rate (% p.a.)</span>
+            <span class="val-badge" id="lbl-inf">3.0%</span>
+          </label>
+          <div class="slider-container">
+            <input type="range" id="inflation" min="1" max="7" step="0.25" value="3" aria-label="Inflation rate percent"
+              oninput="syncRange(this,'lbl-inf','','%');calc()">
+          </div>
         </div>
+
         <div class="field">
-          <label>Cash / Savings Return (% p.a.) <span class="val" id="lbl-cash">4.0%</span></label>
-          <input type="range" id="cashReturn" min="0" max="8" step="0.25" value="4" aria-label="Cash savings return percent"
-            oninput="syncRange(this,'lbl-cash','','%');calc()">
-          <div class="hint">High-interest savings account or offset rate</div>
+          <label>
+            <span class="field-name">Safe Withdrawal Rate (SWR %)</span>
+            <div class="tooltip-wrap">
+              <span class="tooltip-icon" tabindex="0">?</span>
+              <span class="tooltip-text">Annual portfolio withdrawal rate (4% = 25x expenses).</span>
+            </div>
+            <span class="val-badge" id="lbl-swr">4.0%</span>
+          </label>
+          <div class="slider-container">
+            <input type="range" id="swr" min="2" max="6" step="0.25" value="4" aria-label="Safe withdrawal rate percent"
+              oninput="syncRange(this,'lbl-swr','','%');calc()">
+          </div>
+        </div>
+
+        <div class="field">
+          <label>
+            <span class="field-name">Employer Super Guarantee Rate (%)</span>
+            <span class="val-badge" id="lbl-sg">12.0%</span>
+          </label>
+          <div class="slider-container">
+            <input type="range" id="sgRate" min="9" max="15" step="0.5" value="12" aria-label="Employer super guarantee rate percent"
+              oninput="syncRange(this,'lbl-sg','','%');calc()">
+          </div>
+          <div class="hint">12.0% legislative rate starting 1 July 2025.</div>
+        </div>
+
+        <div class="field">
+          <label>
+            <span class="field-name">Cash / Savings Return (% p.a.)</span>
+            <span class="val-badge" id="lbl-cash">4.0%</span>
+          </label>
+          <div class="slider-container">
+            <input type="range" id="cashReturn" min="0" max="8" step="0.25" value="4" aria-label="Cash savings return percent"
+              oninput="syncRange(this,'lbl-cash','','%');calc()">
+          </div>
+          <div class="hint">High-interest savings account or offset rate.</div>
         </div>
       </div>
     </div>
@@ -455,144 +756,239 @@
   </aside>
 
   <!-- ═══════════════════════════════════════ RESULTS PANEL -->
-  <main class="results-panel">
+  <main class="results-panel" id="results-panel">
 
-    <!-- Headline summary -->
-    <div class="hero" id="hero" aria-live="polite"></div>
+    <!-- Executive Headline summary -->
+    <div class="hero-card" id="hero" aria-live="polite"></div>
 
     <!-- FIRE Milestones -->
-    <p class="section-label" id="main-milestones-label">FIRE Milestones</p>
+    <div class="section-title-bar">
+      <div class="st-left">
+        <span class="st-icon">🏆</span>
+        <h2 class="section-label-text" id="main-milestones-label">FIRE Milestones</h2>
+      </div>
+      <span class="st-sub">Target age &amp; funding completion</span>
+    </div>
+
     <div class="milestone-grid">
+      <!-- Lean FIRE -->
       <div class="milestone-card lean" id="card-lean">
-        <div class="mc-label">🔴 Lean FIRE</div>
+        <div class="mc-header">
+          <div class="mc-badge-pill lean-pill">Lean FIRE</div>
+          <span class="mc-icon">🔴</span>
+        </div>
         <div class="mc-age" id="lean-age">—</div>
         <div class="mc-years" id="lean-years"></div>
         <div class="mc-number" id="lean-number"></div>
         <div class="mc-desc" id="lean-desc"></div>
-        <div class="progress-bar"><div class="progress-fill lean-fill" id="lean-bar"></div></div>
-        <div class="progress-pct" id="lean-pct">0% funded</div>
+        <div class="progress-wrap">
+          <div class="progress-bar"><div class="progress-fill lean-fill" id="lean-bar"></div></div>
+          <div class="progress-pct" id="lean-pct">0% funded</div>
+        </div>
       </div>
+
+      <!-- Coast FIRE -->
       <div class="milestone-card coast" id="card-coast">
-        <div class="mc-label">🔵 Coast FIRE</div>
+        <div class="mc-header">
+          <div class="mc-badge-pill coast-pill">Coast FIRE</div>
+          <span class="mc-icon">🔵</span>
+        </div>
         <div class="mc-age" id="coast-age">—</div>
         <div class="mc-years" id="coast-years"></div>
         <div class="mc-number" id="coast-number"></div>
         <div class="mc-desc" id="coast-desc"></div>
-        <div class="progress-bar"><div class="progress-fill coast-fill" id="coast-bar"></div></div>
-        <div class="progress-pct" id="coast-pct">0% funded</div>
+        <div class="progress-wrap">
+          <div class="progress-bar"><div class="progress-fill coast-fill" id="coast-bar"></div></div>
+          <div class="progress-pct" id="coast-pct">0% funded</div>
+        </div>
       </div>
+
+      <!-- Barista FIRE -->
       <div class="milestone-card barista" id="card-barista">
-        <div class="mc-label">🟢 Barista FIRE</div>
+        <div class="mc-header">
+          <div class="mc-badge-pill barista-pill">Barista FIRE</div>
+          <span class="mc-icon">🟢</span>
+        </div>
         <div class="mc-age" id="barista-age">—</div>
         <div class="mc-years" id="barista-years"></div>
         <div class="mc-number" id="barista-number"></div>
         <div class="mc-desc" id="barista-desc"></div>
-        <div class="progress-bar"><div class="progress-fill barista-fill" id="barista-bar"></div></div>
-        <div class="progress-pct" id="barista-pct">0% funded</div>
+        <div class="progress-wrap">
+          <div class="progress-bar"><div class="progress-fill barista-fill" id="barista-bar"></div></div>
+          <div class="progress-pct" id="barista-pct">0% funded</div>
+        </div>
       </div>
+
+      <!-- Full FIRE -->
       <div class="milestone-card full" id="card-full">
-        <div class="mc-label">🟣 Full FIRE</div>
+        <div class="mc-header">
+          <div class="mc-badge-pill full-pill">Full FIRE</div>
+          <span class="mc-icon">🟣</span>
+        </div>
         <div class="mc-age" id="full-age">—</div>
         <div class="mc-years" id="full-years"></div>
         <div class="mc-number" id="full-number"></div>
         <div class="mc-desc" id="full-desc"></div>
-        <div class="progress-bar"><div class="progress-fill full-fill" id="full-bar"></div></div>
-        <div class="progress-pct" id="full-pct">0% funded</div>
+        <div class="progress-wrap">
+          <div class="progress-bar"><div class="progress-fill full-fill" id="full-bar"></div></div>
+          <div class="progress-pct" id="full-pct">0% funded</div>
+        </div>
       </div>
     </div>
 
     <!-- Partner FIRE Milestones + Joint Analysis (shown when Couple) -->
     <div id="partner-section" style="display:none">
-      <p class="section-label">Sequential FIRE: Partner Retires First <span class="section-label-note">partner's individual wealth vs household gap — expenses minus your salary</span></p>
+      <div class="section-title-bar" style="margin-top:24px">
+        <div class="st-left">
+          <span class="st-icon">👫</span>
+          <h2 class="section-label-text">Sequential FIRE: Partner Retires First</h2>
+        </div>
+        <span class="st-sub">Partner's individual wealth covering household gap</span>
+      </div>
+
       <div class="milestone-grid">
         <div class="milestone-card lean partner-card" id="p-card-lean">
-          <div class="mc-label">🔴 Partner Lean</div>
+          <div class="mc-header">
+            <div class="mc-badge-pill lean-pill">Partner Lean</div>
+            <span class="mc-icon">🔴</span>
+          </div>
           <div class="mc-age" id="p-lean-age">—</div>
           <div class="mc-years" id="p-lean-years"></div>
           <div class="mc-number" id="p-lean-number"></div>
           <div class="mc-desc" id="p-lean-desc"></div>
-          <div class="progress-bar"><div class="progress-fill lean-fill" id="p-lean-bar"></div></div>
-          <div class="progress-pct" id="p-lean-pct">0% funded</div>
+          <div class="progress-wrap">
+            <div class="progress-bar"><div class="progress-fill lean-fill" id="p-lean-bar"></div></div>
+            <div class="progress-pct" id="p-lean-pct">0% funded</div>
+          </div>
         </div>
+
         <div class="milestone-card coast partner-card" id="p-card-coast">
-          <div class="mc-label">🔵 Partner Coast FIRE</div>
+          <div class="mc-header">
+            <div class="mc-badge-pill coast-pill">Partner Coast</div>
+            <span class="mc-icon">🔵</span>
+          </div>
           <div class="mc-age" id="p-coast-age">—</div>
           <div class="mc-years" id="p-coast-years"></div>
           <div class="mc-number" id="p-coast-number"></div>
           <div class="mc-desc" id="p-coast-desc"></div>
-          <div class="progress-bar"><div class="progress-fill coast-fill" id="p-coast-bar"></div></div>
-          <div class="progress-pct" id="p-coast-pct">0% funded</div>
+          <div class="progress-wrap">
+            <div class="progress-bar"><div class="progress-fill coast-fill" id="p-coast-bar"></div></div>
+            <div class="progress-pct" id="p-coast-pct">0% funded</div>
+          </div>
         </div>
+
         <div class="milestone-card barista partner-card" id="p-card-barista">
-          <div class="mc-label">🟢 Partner Barista FIRE</div>
+          <div class="mc-header">
+            <div class="mc-badge-pill barista-pill">Partner Barista</div>
+            <span class="mc-icon">🟢</span>
+          </div>
           <div class="mc-age" id="p-barista-age">—</div>
           <div class="mc-years" id="p-barista-years"></div>
           <div class="mc-number" id="p-barista-number"></div>
           <div class="mc-desc" id="p-barista-desc"></div>
-          <div class="progress-bar"><div class="progress-fill barista-fill" id="p-barista-bar"></div></div>
-          <div class="progress-pct" id="p-barista-pct">0% funded</div>
+          <div class="progress-wrap">
+            <div class="progress-bar"><div class="progress-fill barista-fill" id="p-barista-bar"></div></div>
+            <div class="progress-pct" id="p-barista-pct">0% funded</div>
+          </div>
         </div>
+
         <div class="milestone-card full partner-card" id="p-card-full">
-          <div class="mc-label">🟣 Partner Full FIRE</div>
+          <div class="mc-header">
+            <div class="mc-badge-pill full-pill">Partner Full</div>
+            <span class="mc-icon">🟣</span>
+          </div>
           <div class="mc-age" id="p-full-age">—</div>
           <div class="mc-years" id="p-full-years"></div>
           <div class="mc-number" id="p-full-number"></div>
           <div class="mc-desc" id="p-full-desc"></div>
-          <div class="progress-bar"><div class="progress-fill full-fill" id="p-full-bar"></div></div>
-          <div class="progress-pct" id="p-full-pct">0% funded</div>
+          <div class="progress-wrap">
+            <div class="progress-bar"><div class="progress-fill full-fill" id="p-full-bar"></div></div>
+            <div class="progress-pct" id="p-full-pct">0% funded</div>
+          </div>
         </div>
       </div>
 
       <!-- Joint Retirement Analysis -->
-      <p class="section-label" style="margin-top:20px">🤝 Joint Retirement Analysis</p>
+      <div class="section-title-bar" style="margin-top:20px">
+        <div class="st-left">
+          <span class="st-icon">🤝</span>
+          <h2 class="section-label-text">Joint Retirement Analysis</h2>
+        </div>
+      </div>
       <div class="joint-card">
         <div id="joint-summary"></div>
       </div>
     </div>
 
-    <!-- Scenario Analysis -->
-    <div id="scenario-section">
-      <p class="section-label" style="margin-top:24px">📋 Alternate Scenarios</p>
-      <p class="scenario-intro" id="scenario-intro">Simulate different decisions (like retiring immediately or coasting) to see if the portfolio survives to age 90.</p>
-      <div class="scenario-grid" id="scenario-grid"></div>
-    </div>
-
     <!-- Interactive What-If Analysis -->
     <div id="whatif-interactive-section">
-      <p class="section-label" style="margin-top:24px">🎛️ What-If: Retirement Timing</p>
-      <p class="scenario-intro">Adjust target retirement ages below to instantly see the impact on your projected wealth at age 90 and FIRE targets.</p>
+      <div class="section-title-bar" style="margin-top:24px">
+        <div class="st-left">
+          <span class="st-icon">🎛️</span>
+          <h2 class="section-label-text">What-If: Retirement Timing Playground</h2>
+        </div>
+        <span class="st-sub">Live impact on portfolio at 90 &amp; feasibility</span>
+      </div>
       <div id="whatif-sliders-container">
         <div class="whatif-block">
-          <div style="margin-bottom: 12px">
-            <div class="whatif-label">
-              🔀 What if you retire at age&nbsp;<span class="whatif-age-val" id="wi-you-val">55</span>
+          <div class="whatif-controls-grid">
+            <div class="whatif-control-item">
+              <div class="whatif-label">
+                <span>🔀 What if you retire at age</span>
+                <span class="whatif-age-val" id="wi-you-val">55</span>
+              </div>
+              <input type="range" class="whatif-slider" id="wi-you-retire"
+                min="18" max="75" step="1" value="55"
+                oninput="syncRange(this,'wi-you-val','','');runWhatIf()">
             </div>
-            <input type="range" class="whatif-slider" id="wi-you-retire"
-              min="18" max="75" step="1" value="55"
-              oninput="syncRange(this,'wi-you-val','','');runWhatIf()">
-          </div>
-          <div id="wi-partner-container" style="margin-bottom: 12px; display: none;">
-            <div class="whatif-label">
-              🔀 What if partner retires at age&nbsp;<span class="whatif-age-val" id="wi-partner-val">55</span>
+            <div id="wi-partner-container" class="whatif-control-item" style="display: none;">
+              <div class="whatif-label">
+                <span>🔀 What if partner retires at age</span>
+                <span class="whatif-age-val" id="wi-partner-val">55</span>
+              </div>
+              <input type="range" class="whatif-slider" id="wi-partner-retire"
+                min="18" max="75" step="1" value="55"
+                oninput="syncRange(this,'wi-partner-val','','');runWhatIf()">
             </div>
-            <input type="range" class="whatif-slider" id="wi-partner-retire"
-              min="18" max="75" step="1" value="55"
-              oninput="syncRange(this,'wi-partner-val','','');runWhatIf()">
           </div>
           <div class="whatif-result" id="wi-global-result"></div>
         </div>
       </div>
     </div>
 
+    <!-- Alternate Scenarios -->
+    <div id="scenario-section">
+      <div class="section-title-bar" style="margin-top:24px">
+        <div class="st-left">
+          <span class="st-icon">📋</span>
+          <h2 class="section-label-text">Alternate Scenarios</h2>
+        </div>
+        <span class="st-sub" id="scenario-intro">Portfolio survival under different career paths</span>
+      </div>
+      <div class="scenario-grid" id="scenario-grid"></div>
+    </div>
+
     <!-- Optimization Opportunities -->
     <div id="optimization-section">
-      <p class="section-label" style="margin-top:24px">💡 Optimisation Opportunities</p>
-      <p class="scenario-intro">Automated tweaks to your current plan to save tax or increase long-term wealth.</p>
+      <div class="section-title-bar" style="margin-top:24px">
+        <div class="st-left">
+          <span class="st-icon">💡</span>
+          <h2 class="section-label-text">Tax &amp; Wealth Optimisations</h2>
+        </div>
+        <span class="st-sub">Automated strategies to boost long-term wealth</span>
+      </div>
       <div class="scenario-grid" id="opt-grid"></div>
     </div>
 
     <!-- Current Year Summary -->
-    <p class="section-label">This Year's Finances <span class="section-label-note" id="tax-strip-note">your figures</span></p>
+    <div class="section-title-bar" style="margin-top:24px">
+      <div class="st-left">
+        <span class="st-icon">💳</span>
+        <h2 class="section-label-text">Current Year Financial Snapshot</h2>
+      </div>
+      <span class="st-sub" id="tax-strip-note">Primary earner breakdown</span>
+    </div>
+
     <div class="tax-strip" id="tax-strip">
       <div class="tax-item">
         <div class="ti-label">Gross Salary</div>
@@ -606,104 +1002,153 @@
       </div>
       <div class="tax-item green">
         <div class="ti-label">Take-Home Pay</div>
-        <div class="ti-value" id="ts-take">—</div>
+        <div class="ti-value highlight-emerald" id="ts-take">—</div>
         <div class="ti-sub" id="ts-weekly">per week</div>
       </div>
       <div class="tax-item">
-        <div class="ti-label">Employer Super</div>
+        <div class="ti-label">Super Inflow</div>
         <div class="ti-value" id="ts-sg">—</div>
         <div class="ti-sub">SG + sacrifice</div>
       </div>
       <div class="tax-item highlight">
         <div class="ti-label">Annual Savings</div>
-        <div class="ti-value" id="ts-save">—</div>
+        <div class="ti-value highlight-blue" id="ts-save">—</div>
         <div class="ti-sub" id="ts-saverate">to investments</div>
       </div>
       <div class="tax-item">
         <div class="ti-label">Super Cap Room</div>
         <div class="ti-value" id="ts-cap">—</div>
-        <div class="ti-sub">concessional</div>
+        <div class="ti-sub">concessional limit</div>
       </div>
     </div>
 
     <!-- Current Position -->
-    <p class="section-label">Current Portfolio</p>
+    <div class="section-title-bar">
+      <div class="st-left">
+        <span class="st-icon">💎</span>
+        <h2 class="section-label-text">Portfolio Breakdown</h2>
+      </div>
+      <span class="st-sub">Starting asset allocations</span>
+    </div>
+
     <div class="position-grid" id="pos-grid">
       <div class="pos-card super-card">
-        <div class="pc-label" id="pos-super-label">Super</div>
+        <div class="pc-header">
+          <span class="pc-label" id="pos-super-label">Superannuation</span>
+          <span class="pc-badge">Locked till 60</span>
+        </div>
         <div class="pc-val" id="pos-super">—</div>
       </div>
-      <div class="pos-card">
-        <div class="pc-label" id="pos-invest-label">Investments &amp; Cash</div>
+      <div class="pos-card invest-card">
+        <div class="pc-header">
+          <span class="pc-label" id="pos-invest-label">Investments &amp; Cash</span>
+          <span class="pc-badge">Bridge / Liquid</span>
+        </div>
         <div class="pc-val" id="pos-invest">—</div>
       </div>
-      <div class="pos-card">
-        <div class="pc-label" id="pos-total-label">Total Wealth</div>
+      <div class="pos-card total-card">
+        <div class="pc-header">
+          <span class="pc-label" id="pos-total-label">Total Net Wealth</span>
+          <span class="pc-badge highlight-purple">Combined FI Base</span>
+        </div>
         <div class="pc-val" id="pos-total">—</div>
       </div>
     </div>
 
-    <!-- Charts -->
-    <p class="section-label">Projections</p>
+    <!-- Charts Section -->
+    <div class="section-title-bar" style="margin-top:28px">
+      <div class="st-left">
+        <span class="st-icon">📈</span>
+        <h2 class="section-label-text">Interactive Projections</h2>
+      </div>
+      <span class="st-sub">Visual simulation models</span>
+    </div>
+
     <div class="charts-grid">
 
       <div class="chart-card full-span">
-        <h4 id="projection-chart-title">Net Worth Projection to Age 90</h4>
-        <div class="chart-sub">All values in today's dollars. Dashed verticals mark milestones; the shaded band is the Monte Carlo 10–90% range.</div>
+        <div class="chart-header-wrap">
+          <div>
+            <h4 id="projection-chart-title">Net Worth Trajectory to Age 90</h4>
+            <div class="chart-sub">Today's dollars &bull; Dashed verticals mark milestone ages &bull; Shaded zone is Monte Carlo 10–90% confidence range</div>
+          </div>
+        </div>
         <div class="chart-wrap"><canvas id="chart-projection"></canvas></div>
       </div>
 
       <div class="chart-card">
-        <h4>FIRE Timeline</h4>
-        <div class="chart-sub">Age at which each FIRE milestone is reached</div>
+        <div class="chart-header-wrap">
+          <div>
+            <h4>FIRE Milestones Timeline</h4>
+            <div class="chart-sub">Target age when each FIRE tier is fully achieved</div>
+          </div>
+        </div>
         <div class="chart-wrap"><canvas id="chart-timeline"></canvas></div>
       </div>
 
       <div class="chart-card">
-        <h4>Retirement Income Sources</h4>
-        <div class="chart-sub" id="income-chart-sub">First year of your retirement, today's dollars (Age Pension starts at 67)</div>
+        <div class="chart-header-wrap">
+          <div>
+            <h4>Retirement Income Sources</h4>
+            <div class="chart-sub" id="income-chart-sub">First year of retirement drawdown breakdown</div>
+          </div>
+        </div>
         <div class="chart-wrap"><canvas id="chart-income"></canvas></div>
       </div>
 
       <div class="chart-card">
-        <h4>Current Year Tax Breakdown</h4>
-        <div class="chart-sub" id="tax-chart-sub">Where your gross salary goes</div>
+        <div class="chart-header-wrap">
+          <div>
+            <h4>Current Year Tax &amp; Income Split</h4>
+            <div class="chart-sub" id="tax-chart-sub">Where gross salary flows</div>
+          </div>
+        </div>
         <div class="chart-wrap"><canvas id="chart-tax"></canvas></div>
       </div>
 
       <div class="chart-card">
-        <h4>Annual Savings Over Career</h4>
-        <div class="chart-sub" id="savings-chart-sub">Super vs non-super contributions each year, today's dollars</div>
+        <div class="chart-header-wrap">
+          <div>
+            <h4>Annual Savings Over Career</h4>
+            <div class="chart-sub" id="savings-chart-sub">Super guarantee vs taxable investments contributions</div>
+          </div>
+        </div>
         <div class="chart-wrap"><canvas id="chart-savings"></canvas></div>
       </div>
 
     </div>
 
     <!-- Year-by-year detail -->
-    <p class="section-label" style="margin-top:24px">Year-by-Year Detail</p>
+    <div class="section-title-bar" style="margin-top:32px">
+      <div class="st-left">
+        <span class="st-icon">📑</span>
+        <h2 class="section-label-text">Year-by-Year Financial Ledger</h2>
+      </div>
+      <span class="st-sub">Full mathematical breakdown</span>
+    </div>
+
     <details class="year-details">
       <summary>
-        <span>Show full projection table <span class="section-label-note" id="year-table-note">all values in today's dollars</span></span>
-        <button class="mini-btn" onclick="event.preventDefault();exportCSV()" title="Download the projection as CSV">⬇ CSV</button>
+        <div class="summary-left">
+          <span class="summary-title">Explore Complete Annual Table</span>
+          <span class="section-label-note" id="year-table-note">all values in today's dollars</span>
+        </div>
+        <button type="button" class="mini-btn" onclick="event.preventDefault();exportCSV()" title="Download full projection table as CSV">
+          <span class="mini-icon">⬇</span> Export CSV
+        </button>
       </summary>
       <div class="year-table-wrap" id="year-table"></div>
     </details>
 
-    <p class="disclaimer">
-      <strong>General information only — not financial advice.</strong> This is a simplified model:
-      tax brackets, super caps and Age Pension thresholds are assumed to keep pace with inflation;
-      investment income is taxed annually at the holder's marginal rate on the assessable share you set
-      (CGT on final sale is not modelled); each partner's super is tracked separately with their own
-      preservation age, minimum drawdowns and Age Pension means-test treatment (untapped accumulation
-      super of an under-67 partner is exempt); contribution routing approximates contribution-splitting
-      rules. Carry-forward concessional caps, FHSS, insurance premiums in super and survivorship are not
-      modelled; a warning shows if either partner is likely to exceed the $2M transfer balance cap.
-      FY 2025–26 rates. Consider advice from a licensed professional before acting.
-    </p>
+    <footer class="disclaimer">
+      <p>
+        <strong>General information only — not financial advice.</strong> This model applies Australian FY 2025–26 tax rates, Stage 3 tax brackets, Medicare levy rules, superannuation guarantee (12%), concessional caps ($30k), and Age Pension asset/income means tests. Investment returns and inflation are simulated in real purchasing power. Always seek professional advice from a licensed financial planner and the ATO before making financial decisions.
+      </p>
+    </footer>
 
   </main>
 </div>
 
-<script src="app.js?v=20260717b"></script>
+<script src="app.js?v=20260818c"></script>
 </body>
 </html>
