@@ -14,10 +14,12 @@ function incomeTax(income) {
   return 51638 + (income - 190000) * 0.45;
 }
 
-const MEDICARE_THRESHOLD = 28011; // single low-income threshold
-function medicareLevy(income) {
-  if (income <= MEDICARE_THRESHOLD) return 0;
-  return Math.min(income * 0.02, (income - MEDICARE_THRESHOLD) * 0.10);
+const MEDICARE_THRESHOLD        = 28011; // single low-income threshold (FY 2025-26)
+const MEDICARE_THRESHOLD_SENIOR = 43020; // SAPTO-eligible senior single threshold (FY 2025-26)
+function medicareLevy(income, isSenior = false) {
+  const thresh = isSenior ? MEDICARE_THRESHOLD_SENIOR : MEDICARE_THRESHOLD;
+  if (income <= thresh) return 0;
+  return Math.min(income * 0.02, (income - thresh) * 0.10);
 }
 
 // Medicare Levy Surcharge — applies without private hospital cover
@@ -37,11 +39,20 @@ function lito(income) {
   return 0;
 }
 
-// HELP repayments — 2025-26 marginal system
+// Seniors and Pensioners Tax Offset (SAPTO) — FY 2025-26
+function sapto(income, couple = false) {
+  const maxOffset = couple ? 1602 : 2230;
+  const threshold = couple ? 28974 : 32279;
+  if (income <= threshold) return maxOffset;
+  return Math.max(0, maxOffset - (income - threshold) * 0.125);
+}
+
+// HELP repayments — 2025-26 marginal system (switches to 10% flat above $179,285)
 function hecsRepayment(repayIncome) {
   if (repayIncome <= 67000)  return 0;
   if (repayIncome <= 125000) return (repayIncome - 67000) * 0.15;
-  return 8700 + (repayIncome - 125000) * 0.17;
+  if (repayIncome <= 179285) return 8700 + (repayIncome - 125000) * 0.17;
+  return repayIncome * 0.10;
 }
 
 function div293Tax(taxableIncome, concessional) {
@@ -52,21 +63,28 @@ function div293Tax(taxableIncome, concessional) {
 
 // Marginal cost of extra assessable income (e.g. investment distributions)
 // stacked on top of a person's existing taxable income
-const taxPlusMedicare  = t => Math.max(0, incomeTax(t) - lito(t)) + medicareLevy(t);
-const taxOnExtraIncome = (base, extra) =>
-  extra <= 0 ? 0 : taxPlusMedicare(base + extra) - taxPlusMedicare(base);
+const taxPlusMedicare = (t, isSenior = false, couple = false) => {
+  const offset = lito(t) + (isSenior ? sapto(t, couple) : 0);
+  return Math.max(0, incomeTax(t) - offset) + medicareLevy(t, isSenior);
+};
+const taxOnExtraIncome = (base, extra, isSenior = false, couple = false) =>
+  extra <= 0 ? 0 : taxPlusMedicare(base + extra, isSenior, couple) - taxPlusMedicare(base, isSenior, couple);
 
 function calcTax(grossSalary, salarySacrifice, hasHECS, opts = {}) {
-  const taxable   = Math.max(0, grossSalary - salarySacrifice);
-  const mlsIncome = taxable + salarySacrifice; // income for MLS/HELP incl. reportable super
-  const base      = Math.max(0, incomeTax(taxable) - lito(taxable)); // LITO offsets income tax only
-  const medicare  = medicareLevy(taxable);
+  const gross     = Math.max(0, grossSalary || 0);
+  const sac       = Math.max(0, Math.min(salarySacrifice || 0, gross));
+  const taxable   = Math.max(0, gross - sac);
+  const mlsIncome = taxable + sac; // income for MLS/HELP incl. reportable super
+  const isSen     = !!opts.isSenior;
+  const offset    = lito(taxable) + (isSen ? sapto(taxable, !!opts.family) : 0);
+  const base      = Math.max(0, incomeTax(taxable) - offset); // LITO & SAPTO offset income tax only
+  const medicare  = medicareLevy(taxable, isSen);
   const mls       = opts.noPHI ? mlsAmount(mlsIncome, opts.mlsCombined ?? mlsIncome, !!opts.family) : 0;
   const raw       = base + medicare + mls;
   // HELP repayment income includes reportable super — sacrifice doesn't reduce it
   const hecs      = hasHECS ? hecsRepayment(mlsIncome) : 0;
   const total     = raw + hecs;
-  return { taxable, raw, medicare, mls, hecs, total, net: Math.max(0, grossSalary - salarySacrifice - total) };
+  return { taxable, sac, raw, medicare, mls, hecs, total, net: Math.max(0, gross - sac - total) };
 }
 
 // ══════════════════════════════════════════════════════════
@@ -75,10 +93,13 @@ function calcTax(grossSalary, salarySacrifice, hasHECS, opts = {}) {
 
 const CONCESSIONAL_CAP      = 30000;
 const NON_CONCESSIONAL_CAP  = 120000;
+const MAX_SG_BASE           = 250000; // FY 2025-26 Maximum Super Contribution Base ($62,500/qtr)
+const CARRY_FWD_TSB_LIMIT   = 500000; // Total super balance must be < $500k to use carry-forward
 const PRESERVATION_AGE      = 60;
 const UNRESTRICTED_AGE      = 65;
 const AGE_PENSION_AGE       = 67;
 const TRANSFER_BALANCE_CAP  = 2000000;
+const NCC_TSB_LIMIT         = TRANSFER_BALANCE_CAP;
 
 function minDrawdownRate(age) {
   if (age < 65) return 0.040;
@@ -98,20 +119,28 @@ const INCOME_FREE_SINGLE = 218 * 26, INCOME_FREE_COUPLE = 380 * 26;
 const WORK_BONUS = 7800; // employment income disregarded by the income test ($300/fn)
 
 // Pension paid is the LOWER of the assets-test and income-test results.
-// For a couple with only one member of pension age, roughly the member
-// rate (half the couple rate) is payable, tested on combined means.
+// For a couple with only one member of pension age, half the couple rate
+// and half the combined taper rates apply, tested on combined means.
 function agePensionEstimate(assessableAssets, homeowner, couple, opts = {}) {
   const bothEligible = opts.bothEligible !== false;
-  const maxRate = couple ? (bothEligible ? PENSION_COUPLE : PENSION_COUPLE / 2) : PENSION_SINGLE;
+  const scale = (couple && !bothEligible) ? 0.5 : 1;
+  const maxRate = (couple ? PENSION_COUPLE : PENSION_SINGLE) * scale;
   const fullThresh = (couple ? 481500 : 321500) + (homeowner ? 0 : 258000);
   const assetTest = Math.max(0, maxRate -
-    Math.max(0, Math.floor((assessableAssets - fullThresh) / 1000)) * 3 * 26);
+    Math.max(0, Math.floor((assessableAssets - fullThresh) / 1000)) * 3 * 26 * scale);
   const dt = couple ? DEEM_THRESH_COUPLE : DEEM_THRESH_SINGLE;
   const deemed = Math.min(assessableAssets, dt) * DEEM_LOW +
     Math.max(0, assessableAssets - dt) * DEEM_HIGH;
-  const employment = Math.max(0, (opts.otherIncome || 0) - WORK_BONUS);
+  let employment = 0;
+  if (opts.p1WorkIncome !== undefined || opts.p2WorkIncome !== undefined) {
+    const p1Emp = opts.p1WorkIncome ? Math.max(0, opts.p1WorkIncome - (opts.p1Eligible ? WORK_BONUS : 0)) : 0;
+    const p2Emp = opts.p2WorkIncome ? Math.max(0, opts.p2WorkIncome - (opts.p2Eligible ? WORK_BONUS : 0)) : 0;
+    employment = p1Emp + p2Emp;
+  } else {
+    employment = Math.max(0, (opts.otherIncome || 0) - WORK_BONUS);
+  }
   const freeArea = couple ? INCOME_FREE_COUPLE : INCOME_FREE_SINGLE;
-  const incomeTest = Math.max(0, maxRate - Math.max(0, deemed + employment - freeArea) * 0.5);
+  const incomeTest = Math.max(0, maxRate - Math.max(0, deemed + employment - freeArea) * 0.5 * scale);
   return Math.min(assetTest, incomeTest);
 }
 
@@ -121,20 +150,23 @@ function agePensionEstimate(assessableAssets, homeowner, couple, opts = {}) {
 
 const fiNumber    = (expenses, swr) => expenses / swr;
 const coastTarget = (fi, years, r)  => fi / Math.pow(1 + r, years);
-const annuityPV   = (pmt, years, r) => years <= 0 ? 0
-  : Math.abs(r) < 1e-5 ? pmt * years : pmt * (1 - Math.pow(1 + r, -years)) / r;
+const annuityPV   = (pmt, years, r, due = false) => {
+  if (years <= 0 || pmt === 0) return 0;
+  const base = Math.abs(r) < 1e-5 ? pmt * years : pmt * (1 - Math.pow(1 + r, -years)) / r;
+  return due ? base * (1 + r) : base;
+};
 
 function earlyFIBridge(realExpenses, superNowReal, yearsToPreserve, realInvR, realSupR, swr) {
   const N = yearsToPreserve;
   if (N <= 0) return realExpenses / swr;
-  const bridge = annuityPV(realExpenses, N, realInvR);
+  const bridge = annuityPV(realExpenses, N, realInvR, true);
   const superAtPreserve = superNowReal * Math.pow(1 + realSupR, N);
   const fi60    = realExpenses / swr;
   const deficit = Math.max(0, fi60 - superAtPreserve) / Math.pow(1 + realInvR, N);
   return bridge + deficit;
 }
 
-// Annual P&I repayment on a nominal mortgage (standard annuity formula).
+// Annual P&I repayment on a nominal mortgage (standard monthly annuity × 12).
 // Returns 0 if amount or term is zero.
 function annualMortgageRepayment(principal, annualRate, termYears) {
   if (principal <= 0 || termYears <= 0) return 0;
@@ -145,24 +177,135 @@ function annualMortgageRepayment(principal, annualRate, termYears) {
   return monthly * 12;
 }
 
+// Exact 12-month mortgage amortization step with optional year-end extra repayment.
+function amortizeMortgageYear(balance, annualRate, monthlyBasePmt, annualExtraNominal = 0) {
+  if (balance <= 0) return { endBalance: 0, basePaid: 0, extraPaid: 0 };
+  const r = annualRate > 0 ? annualRate / 12 : 0;
+  let bal = balance;
+  let basePaid = 0;
+  for (let m = 0; m < 12 && bal > 0; m++) {
+    bal *= (1 + r);
+    const pmt = Math.min(bal, monthlyBasePmt);
+    bal -= pmt;
+    basePaid += pmt;
+  }
+  const extraPaid = Math.min(bal, Math.max(0, annualExtraNominal));
+  bal -= extraPaid;
+  if (bal < 1e-6) bal = 0;
+  return { endBalance: bal, basePaid, extraPaid };
+}
+
 // Effective full expenses at a given age, adjusted for house purchase/mortgage/payoff.
-// Returns the adjusted fullExpenses (rent removed, mortgage substituted where applicable).
-// The mortgage repayment is fixed in nominal dollars, so its real-dollar burden
-// shrinks each year with inflation — same treatment as a flat (non-growing) salary.
-// NOTE: this uses the base (no extra repayments) term/payoff age as an approximation —
-// it's called standalone for FI-target comparisons, without the year-by-year savings
-// figures needed to replay extra repayments. The main project() loop below tracks the
-// real accelerated payoff when extraRepaymentPct is set.
+// Used for standalone FI-target comparisons.
 function houseExpAdjAt(inp, age) {
-  const { houseDeposit = 0, houseBuyAge = 0, mortgageAmount = 0, rentSaving = 0,
+  const { currentAge = 0, houseDeposit = 0, houseBuyAge = 0, mortgageAmount = 0, rentSaving = 0,
           mortgageRate = 0, mortgageTerm = 0, fullExpenses, inflation = 0 } = inp;
   const active = houseDeposit > 0 || mortgageAmount > 0;
-  if (!active || age < houseBuyAge) return fullExpenses;
+  const effBuyAge = active ? Math.max(currentAge, houseBuyAge) : 0;
+  if (!active || age < effBuyAge) return fullExpenses;
   const repaymentNominal = annualMortgageRepayment(mortgageAmount, mortgageRate, mortgageTerm);
-  const repaymentReal = repaymentNominal / Math.pow(1 + inflation, age - houseBuyAge);
-  const paidAge   = mortgageTerm > 0 ? houseBuyAge + mortgageTerm : null;
+  const repaymentReal = repaymentNominal / Math.pow(1 + inflation, age - effBuyAge);
+  const paidAge   = mortgageTerm > 0 ? effBuyAge + mortgageTerm : null;
   const adj = (paidAge == null || age < paidAge) ? (repaymentReal - rentSaving) : -rentSaving;
   return Math.max(0, fullExpenses + adj);
+}
+
+// Liquid wealth target at `fromAge` accounting for per-person preservation ages,
+// exact pre-60 bridge, house purchase transitions, and optional Barista income.
+function houseAwareTarget(inp, baseExp, fromAge, p2AgeAtFrom, lockedSup1, lockedSup2, realR, realSupR, swr, paidAgeEst, incomeNet = 0, stopAge = 0) {
+  const {
+    currentAge = 0, couple = false, houseDeposit = 0, houseBuyAge = 0,
+    mortgageAmount = 0, rentSaving = 0, mortgageRate = 0, mortgageTerm = 0, inflation = 0,
+  } = inp;
+  const houseActive = houseDeposit > 0 || mortgageAmount > 0;
+  const effBuyAge = houseActive ? Math.max(currentAge, houseBuyAge) : 0;
+  const steadyExp = Math.max(0, baseExp - (houseActive ? rentSaving : 0));
+  const repayNom = annualMortgageRepayment(mortgageAmount, mortgageRate, mortgageTerm);
+  const finalPaidAge = paidAgeEst ?? (mortgageTerm > 0 ? effBuyAge + mortgageTerm : null);
+
+  const y1 = lockedSup1 > 0 && fromAge < PRESERVATION_AGE ? PRESERVATION_AGE - fromAge : 0;
+  const y2 = couple && lockedSup2 > 0 && p2AgeAtFrom < PRESERVATION_AGE ? PRESERVATION_AGE - p2AgeAtFrom : 0;
+  const horizon = Math.max(y1, y2);
+  const horizonAge = fromAge + horizon;
+
+  const yearSpend = (ageAtYr) => {
+    let houseAdj = 0;
+    if (houseActive) {
+      if (ageAtYr < effBuyAge) houseAdj = 0;
+      else if (finalPaidAge == null || ageAtYr < finalPaidAge) {
+        houseAdj = repayNom / Math.pow(1 + inflation, ageAtYr - effBuyAge) - rentSaving;
+      } else {
+        houseAdj = -rentSaving;
+      }
+    }
+    const inc = (incomeNet > 0 && ageAtYr < stopAge) ? incomeNet : 0;
+    return Math.max(0, baseExp + houseAdj - inc);
+  };
+
+  // Helper: PV at startYr (relative to fromAge) of bridge spending from startYr to endYr-1
+  const spanPV = (startYr, endYr) => {
+    let pv = 0;
+    for (let k = startYr; k < endYr; k++) {
+      const ageAtK = fromAge + k;
+      let cost = yearSpend(ageAtK);
+      // Deposit is drawn at start of effBuyAge (except if effBuyAge === fromAge and already counted/drawn)
+      if (houseActive && houseDeposit > 0 && ageAtK === effBuyAge && effBuyAge > fromAge) {
+        cost += houseDeposit;
+      }
+      pv += cost / Math.pow(1 + realR, k - startYr);
+    }
+    return pv;
+  };
+
+  // Post-horizon steady-state FI + finite house transition costs at horizonAge
+  let postHouseExtraPV = 0;
+  if (houseActive) {
+    if (effBuyAge > horizonAge) {
+      // Still renting from horizonAge until effBuyAge, then deposit
+      const rentYears = effBuyAge - horizonAge;
+      postHouseExtraPV += annuityPV(rentSaving, rentYears, realR, true);
+      if (houseDeposit > 0) postHouseExtraPV += houseDeposit / Math.pow(1 + realR, rentYears);
+    } else if (houseDeposit > 0 && effBuyAge === horizonAge && horizonAge > fromAge) {
+      postHouseExtraPV += houseDeposit;
+    }
+    if (finalPaidAge != null && finalPaidAge > horizonAge) {
+      const startMortAge = Math.max(horizonAge, effBuyAge);
+      for (let a = startMortAge; a < finalPaidAge; a++) {
+        const repReal = repayNom / Math.pow(1 + inflation, a - effBuyAge);
+        postHouseExtraPV += repReal / Math.pow(1 + realR, a - horizonAge);
+      }
+    }
+  }
+  const postBaristaPV = incomeNet > 0 && stopAge > horizonAge
+    ? annuityPV(incomeNet, stopAge - horizonAge, realR, true)
+    : 0;
+  const needAtHorizon = Math.max(0, fiNumber(steadyExp, swr) + postHouseExtraPV - postBaristaPV);
+
+  if (y1 === 0 && y2 === 0) return needAtHorizon;
+
+  // Single locked super pool
+  if (y1 > 0 && y2 === 0) {
+    const sup1AtY1 = lockedSup1 * Math.pow(1 + realSupR, y1);
+    const deficitAtY1 = Math.max(0, needAtHorizon - sup1AtY1);
+    return spanPV(0, y1) + deficitAtY1 / Math.pow(1 + realR, y1);
+  }
+  if (y2 > 0 && y1 === 0) {
+    const sup2AtY2 = lockedSup2 * Math.pow(1 + realSupR, y2);
+    const deficitAtY2 = Math.max(0, needAtHorizon - sup2AtY2);
+    return spanPV(0, y2) + deficitAtY2 / Math.pow(1 + realR, y2);
+  }
+
+  // Two locked super pools: backward induction from later unlock to earlier unlock
+  const firstY  = Math.min(y1, y2);
+  const secondY = Math.max(y1, y2);
+  const firstSup  = y1 <= y2 ? lockedSup1 : lockedSup2;
+  const secondSup = y1 <= y2 ? lockedSup2 : lockedSup1;
+  const secondAtUnlock = secondSup * Math.pow(1 + realSupR, secondY);
+  const deficitAtSecond = Math.max(0, needAtHorizon - secondAtUnlock);
+  const needAtFirst = spanPV(firstY, secondY) + deficitAtSecond / Math.pow(1 + realR, secondY - firstY);
+  const firstAtUnlock = firstSup * Math.pow(1 + realSupR, firstY);
+  const deficitAtFirst = Math.max(0, needAtFirst - firstAtUnlock);
+  return spanPV(0, firstY) + deficitAtFirst / Math.pow(1 + realR, firstY);
 }
 
 // ══════════════════════════════════════════════════════════
@@ -189,14 +332,11 @@ function project(inp, opts = {}) {
     mortgageRate = 0, mortgageTerm = 0, extraRepaymentPct = 0,
   } = inp;
 
-  // Mortgage repayment is fixed in nominal dollars for the loan's life, so its
-  // real-dollar burden shrinks each year with inflation (discounted per-year below).
+  // Exact monthly P&I payment and effective buy age (past buy ages execute immediately at currentAge).
   const mortgageRepaymentNominal = annualMortgageRepayment(mortgageAmount, mortgageRate, mortgageTerm);
+  const monthlyBasePmt    = mortgageRepaymentNominal / 12;
   const houseBuyActive    = houseDeposit > 0 || mortgageAmount > 0;
-  // Outstanding loan balance (nominal $, since interest accrues in nominal terms).
-  // Amortizes down each year by the base repayment plus any extra repayment
-  // redirected from savings; payoff age is wherever the balance actually hits
-  // zero, not a fixed houseBuyAge+term (which only holds absent extra repayments).
+  const effHouseBuyAge    = houseBuyActive ? Math.max(currentAge, houseBuyAge) : 0;
   let loanBalance = 0;
   let mortgagePaidAge = null;
 
@@ -204,10 +344,10 @@ function project(inp, opts = {}) {
   const vol   = opts.vol || 0;
   const shock = opts.shock || null;
 
-  const realR     = (1 + investReturn) / (1 + inflation) - 1;
-  const realSupR  = (1 + superReturn) / (1 + inflation) - 1;
+  const realR       = (1 + investReturn) / (1 + inflation) - 1;
+  const realSupR    = (1 + superReturn) / (1 + inflation) - 1;
   const realSupPenR = (1 + superReturn + 0.01) / (1 + inflation) - 1; // ~1.0% boost in tax-free pension phase
-  const realCashR = (1 + cashReturn) / (1 + inflation) - 1;
+  const realCashR   = (1 + cashReturn) / (1 + inflation) - 1;
 
   // Per-person super pools: preservation age, pension means tests and
   // minimum drawdowns all depend on the owner's age, not the household's
@@ -220,28 +360,64 @@ function project(inp, opts = {}) {
   let p1Help = hecsActive ? hecsBalance : 0;
   let p2Help = couple && partnerHecsActive ? partnerHecsBalance : 0;
   let helpPaidOffAge = null;
-  
+  let partnerHelpPaidOffAge = null;
+
   let p1CarryFwd = carryForwardCap;
   let p2CarryFwd = partnerCarryForwardCap;
 
-  // Investment & cash income is taxed at the marginal rate of whichever
-  // partner holds the assets (couples typically use the lower earner)
-  const investmentTax = (assessable, p1Income, p2Income, age, p2AgeNow) => {
-    if (assessable <= 0) return 0;
+  const splitInvIncome = (assessable, p1Base, p2Base) => {
+    if (assessable <= 0) return [0, 0];
+    if (!couple) return [assessable, 0];
+    if (investHolder === 'higher') return p1Base >= p2Base ? [assessable, 0] : [0, assessable];
+    if (investHolder === 'split')  return [assessable / 2, assessable / 2];
+    return p1Base <= p2Base ? [assessable, 0] : [0, assessable];
+  };
+
+  // Tax on nominal investment distributions & cash interest, expressed in real dollars.
+  // Also captures incremental MLS and HECS repayments triggered by investment income.
+  const calcInvAndCashTax = (invBase, cashBase, p1TaxBase, p2TaxBase, p1MlsBase, p2MlsBase, age, p2AgeNow, rInvNow) => {
+    const nomInvR = (1 + rInvNow) * (1 + inflation) - 1;
+    const assessable =
+      invBase * Math.max(0, nomInvR) * taxableShare / (1 + inflation) +
+      cashBase * Math.max(0, cashReturn) / (1 + inflation);
+    if (assessable <= 0) return { invTax: 0, p1InvInc: 0, p2InvInc: 0, p1HecsDelta: 0, p2HecsDelta: 0 };
+
+    const [p1InvInc, p2InvInc] = splitInvIncome(assessable, p1TaxBase, p2TaxBase);
     const p1Sen = age >= AGE_PENSION_AGE;
     const p2Sen = couple && p2AgeNow >= AGE_PENSION_AGE;
-    if (!couple) return taxOnExtraIncome(p1Income, assessable, p1Sen);
-    if (investHolder === 'higher') return taxOnExtraIncome(Math.max(p1Income, p2Income), assessable, p1Income >= p2Income ? p1Sen : p2Sen);
-    if (investHolder === 'split')
-      return taxOnExtraIncome(p1Income, assessable / 2, p1Sen) + taxOnExtraIncome(p2Income, assessable / 2, p2Sen);
-    return taxOnExtraIncome(Math.min(p1Income, p2Income), assessable, p1Income <= p2Income ? p1Sen : p2Sen);
+
+    let invTax =
+      taxOnExtraIncome(p1TaxBase, p1InvInc, p1Sen, couple) +
+      (couple ? taxOnExtraIncome(p2TaxBase, p2InvInc, p2Sen, couple) : 0);
+
+    if (!privateHealth) {
+      const combBefore = p1MlsBase + p2MlsBase;
+      const combAfter  = combBefore + p1InvInc + p2InvInc;
+      const mlsBefore  = mlsAmount(p1MlsBase, combBefore, couple) + (couple ? mlsAmount(p2MlsBase, combBefore, couple) : 0);
+      const mlsAfter   = mlsAmount(p1MlsBase + p1InvInc, combAfter, couple) + (couple ? mlsAmount(p2MlsBase + p2InvInc, combAfter, couple) : 0);
+      invTax += Math.max(0, mlsAfter - mlsBefore);
+    }
+
+    let p1HecsDelta = 0, p2HecsDelta = 0;
+    if (p1Help > 0 && p1InvInc > 0) {
+      p1HecsDelta = Math.min(p1Help, Math.max(0, hecsRepayment(p1MlsBase + p1InvInc) - hecsRepayment(p1MlsBase)));
+      p1Help -= p1HecsDelta;
+      if (hecsActive && helpPaidOffAge == null && p1Help <= 0) helpPaidOffAge = age;
+      invTax += p1HecsDelta;
+    }
+    if (couple && p2Help > 0 && p2InvInc > 0) {
+      p2HecsDelta = Math.min(p2Help, Math.max(0, hecsRepayment(p2MlsBase + p2InvInc) - hecsRepayment(p2MlsBase)));
+      p2Help -= p2HecsDelta;
+      if (partnerHecsActive && partnerHelpPaidOffAge == null && p2Help <= 0) partnerHelpPaidOffAge = age;
+      invTax += p2HecsDelta;
+    }
+
+    return { invTax, p1InvInc, p2InvInc, p1HecsDelta, p2HecsDelta };
   };
 
   const fi     = fiNumber(fullExpenses, swr);
   const leanFI = fiNumber(leanExpenses, swr);
-  // Coast target uses expenses as they'll be AT retirement age, so a house
-  // purchase that changes the expense level by then is reflected correctly.
-  const fiAtRetirement = fiNumber(houseExpAdjAt(inp, retirementAge), swr);
+  const baristaNet = calcTax(baristaIncome, 0, false, { noPHI: !privateHealth, family: couple }).net;
 
   const rows = [], totalsReal = [];
   let leanAge = null, coastAge = null, baristaAge = null, fullAge = null;
@@ -252,10 +428,10 @@ function project(inp, opts = {}) {
     const infAdj   = Math.pow(1 + inflation, yr);
     const retired  = age >= retirementAge;
 
-    const z    = shock ? shock(yr) : 0;
-    const rInv = realR    + vol * z;
-    const rSup = realSupR + vol * z;
-    const rSupPen = realSupPenR + vol * z;
+    const z       = shock ? shock(yr) : 0;
+    const rInv    = Math.max(-0.99, realR       + vol * z);
+    const rSup    = Math.max(-0.99, realSupR    + vol * z);
+    const rSupPen = Math.max(-0.99, realSupPenR + vol * z);
 
     const p2AgeNow  = couple ? partnerAge + yr : 0;
     const p2Working = couple && partnerSalary > 0 && p2AgeNow < partnerRetirementAge;
@@ -263,6 +439,13 @@ function project(inp, opts = {}) {
     const p1Can = age >= UNRESTRICTED_AGE || (age >= PRESERVATION_AGE && retired);
     const p2Can = couple && (p2AgeNow >= UNRESTRICTED_AGE ||
       (p2AgeNow >= PRESERVATION_AGE && !p2Working));
+
+    const p1Eligible = age >= AGE_PENSION_AGE;
+    const p2Eligible = couple && p2AgeNow >= AGE_PENSION_AGE;
+
+    // Convert eligible super to tax-free pension phase once Age Pension sheltering no longer helps
+    if (!p1Tapped && p1Can && (p1Eligible || (retired && (!couple || !p2Eligible)))) p1Tapped = true;
+    if (couple && !p2Tapped && p2Can && (p2Eligible || (!p2Working && !p1Eligible))) p2Tapped = true;
 
     const growSuper = (bal, tapped) => {
       if (!tapped) return bal * (1 + rSup);
@@ -282,9 +465,7 @@ function project(inp, opts = {}) {
       if (ev > 1 && !failed) { failed = true; depleteAge = age; }
     }
     // House purchase: draw deposit from cash then investments at buy age.
-    // Super isn't a realistic source for a house deposit outside FHSSS, so it's
-    // excluded here — any shortfall surfaces as a normal depletion warning.
-    if (houseBuyActive && age === houseBuyAge) {
+    if (houseBuyActive && age === effHouseBuyAge) {
       loanBalance = mortgageAmount;
       if (houseDeposit > 0) {
         let dep = houseDeposit;
@@ -294,49 +475,52 @@ function project(inp, opts = {}) {
       }
     }
 
-    // Expense adjustment for house purchase phase:
-    //   pre-buy:       base expenses (includes rent)
-    //   buying→payoff: replace rent with mortgage repayment (nominal repayment
-    //                  discounted to real dollars, since it's fixed for the loan's life)
-    //   post-payoff:   remove rent, no mortgage
-    // mortgageActive reflects the balance carried in from last year's amortization
-    // (see extra-repayment block below), so payoff can land earlier than houseBuyAge+term.
-    const mortgageActive = houseBuyActive && age >= houseBuyAge && loanBalance > 0;
-    let extraRepaymentReal = 0; // set below when working & redirecting savings; amortized after both branches
-    const mortgageRepaymentReal = mortgageActive
-      ? mortgageRepaymentNominal / Math.pow(1 + inflation, age - houseBuyAge) : 0;
-    const houseExpAdj = !houseBuyActive || age < houseBuyAge ? 0
+    const mortgageActive = houseBuyActive && age >= effHouseBuyAge && loanBalance > 0;
+    const infFromBuy = houseBuyActive && age >= effHouseBuyAge ? Math.pow(1 + inflation, age - effHouseBuyAge) : 1;
+    const baseAmort = mortgageActive
+      ? amortizeMortgageYear(loanBalance, mortgageRate, monthlyBasePmt, 0)
+      : { endBalance: 0, basePaid: 0, extraPaid: 0 };
+    const mortgageRepaymentReal = mortgageActive ? baseAmort.basePaid / infFromBuy : 0;
+    const houseExpAdj = !houseBuyActive || age < effHouseBuyAge ? 0
       : mortgageActive ? (mortgageRepaymentReal - rentSaving)
       : -rentSaving;
-    // Whether we own the home yet (affects Age Pension assets test homeowner threshold)
-    const isHomeowner = homeowner || (houseBuyActive && age >= houseBuyAge);
+    const isHomeowner = homeowner || (houseBuyActive && age >= effHouseBuyAge);
 
     let annualTax = {}, annualSavings = 0, sgContrib = 0, extraConc = 0,
         netSuperContrib = 0, pensionY = 0, supDraw = 0, invDraw = 0,
-        cashDraw = 0, householdNet = 0, invTax = 0;
+        cashDraw = 0, householdNet = 0, invTax = 0, superTax = 0;
+    let extraRepaymentReal = 0;
 
     if (!retired) {
       // Australian taxation is individual — each earner taxed separately.
-      // Flat real salary if it tracks inflation, otherwise declining in real terms.
       const p1Salary = growSalary ? grossSalary : grossSalary / infAdj;
       const p2Salary = p2Working ? (growSalary ? partnerSalary : partnerSalary / infAdj) : 0;
 
-      const p1SG  = p1Salary * sgRate;
-      const p2SG  = p2Salary * sgRate;
-      
+      const p1SG  = Math.min(p1Salary, MAX_SG_BASE) * sgRate;
+      const p2SG  = Math.min(p2Salary, MAX_SG_BASE) * sgRate;
+
       const p1BaseCap = Math.max(0, CONCESSIONAL_CAP - p1SG);
-      const p1Sac = Math.min(extraConcessional, p1BaseCap + p1CarryFwd);
+      const p1EligibleCF = sup1 < CARRY_FWD_TSB_LIMIT ? p1CarryFwd : 0;
+      const p1Sac = Math.max(0, Math.min(extraConcessional, p1Salary, p1BaseCap + p1EligibleCF));
       if (p1Sac > p1BaseCap) p1CarryFwd = Math.max(0, p1CarryFwd - (p1Sac - p1BaseCap));
-      
+
       const p2BaseCap = Math.max(0, CONCESSIONAL_CAP - p2SG);
-      const p2Sac = p2Working ? Math.min(partnerExtraConcessional, p2BaseCap + p2CarryFwd) : 0;
+      const p2EligibleCF = sup2 < CARRY_FWD_TSB_LIMIT ? p2CarryFwd : 0;
+      const p2Sac = p2Working ? Math.max(0, Math.min(partnerExtraConcessional, p2Salary, p2BaseCap + p2EligibleCF)) : 0;
       if (p2Working && p2Sac > p2BaseCap) p2CarryFwd = Math.max(0, p2CarryFwd - (p2Sac - p2BaseCap));
 
-      const nonConc = Math.min(extraNonConcessional, NON_CONCESSIONAL_CAP);
+      // Check NCC TSB eligibility for the target super account(s)
+      const p1NccOk = sup1 < NCC_TSB_LIMIT;
+      const p2NccOk = couple && sup2 < NCC_TSB_LIMIT && p2AgeNow < 75;
+      const nccCanRoute = !couple ? p1NccOk
+        : contribTarget === 'partner' ? p2NccOk
+        : contribTarget === 'split'   ? (p1NccOk || p2NccOk)
+        : p1NccOk;
+      const nonConc = nccCanRoute ? Math.max(0, Math.min(extraNonConcessional, NON_CONCESSIONAL_CAP)) : 0;
 
       const mlsOpts = { noPHI: !privateHealth, family: couple, mlsCombined: p1Salary + p2Salary };
-      const p1Tax = calcTax(p1Salary, p1Sac, p1Help > 0, { ...mlsOpts, isSenior: age >= AGE_PENSION_AGE });
-      const p2Tax = p2Salary > 0 ? calcTax(p2Salary, p2Sac, p2Help > 0, { ...mlsOpts, isSenior: p2AgeNow >= AGE_PENSION_AGE })
+      const p1Tax = calcTax(p1Salary, p1Sac, p1Help > 0, { ...mlsOpts, isSenior: p1Eligible });
+      const p2Tax = p2Salary > 0 ? calcTax(p2Salary, p2Sac, p2Help > 0, { ...mlsOpts, isSenior: p2Eligible })
         : { net: 0, raw: 0, hecs: 0, total: 0, taxable: 0 };
 
       // HELP: repay only until the balance is gone, then keep the cash
@@ -344,18 +528,55 @@ function project(inp, opts = {}) {
       const p2Repay = Math.min(p2Tax.hecs, p2Help);
       p1Help -= p1Repay; p2Help -= p2Repay;
       if (hecsActive && helpPaidOffAge == null && p1Help <= 0) helpPaidOffAge = age;
+      if (partnerHecsActive && partnerHelpPaidOffAge == null && p2Help <= 0) partnerHelpPaidOffAge = age;
 
-      const takeHome = p1Tax.net + (p1Tax.hecs - p1Repay) + p2Tax.net + (p2Tax.hecs - p2Repay);
-      householdNet = takeHome;
+      // Age Pension applies even if still working once 67+
+      if (includeAgePension && (p1Eligible || p2Eligible)) {
+        const assessablePen = inv + cash
+          + ((p1Eligible || p1Tapped) ? sup1 : 0)
+          + ((p2Eligible || p2Tapped) ? sup2 : 0);
+        pensionY = agePensionEstimate(assessablePen, isHomeowner, couple, {
+          bothEligible: couple ? (p1Eligible && p2Eligible) : true,
+          p1WorkIncome: p1Salary,
+          p2WorkIncome: p2Salary,
+          p1Eligible,
+          p2Eligible,
+        });
+      }
+      const [p1PenTaxable, p2PenTaxable] = !couple ? [pensionY, 0]
+        : (p1Eligible && p2Eligible) ? [pensionY / 2, pensionY / 2]
+        : p1Eligible ? [pensionY, 0] : [0, pensionY];
 
-      const cashflow = takeHome - (currentExpenses + houseExpAdj) - nonConc;
+      // Enforce mandatory minimum drawdown if any super pot is already in pension phase
+      let excessToInv = 0;
+      const minDrawPot = (bal, tapped, ownerAge) => {
+        if (!tapped || bal <= 0) return 0;
+        return Math.min(bal, bal * minDrawdownRate(ownerAge));
+      };
+      const p1Min = minDrawPot(sup1, p1Tapped, age);
+      const p2Min = couple ? minDrawPot(sup2, p2Tapped, p2AgeNow) : 0;
+      sup1 -= p1Min; sup2 -= p2Min;
+      supDraw += p1Min + p2Min;
+      excessToInv += p1Min + p2Min;
+
+      const salaryTakeHome = p1Tax.net + (p1Tax.hecs - p1Repay) + p2Tax.net + (p2Tax.hecs - p2Repay);
+      householdNet = salaryTakeHome;
+
+      // Include pension + any mandatory super drawdown in available cashflow
+      const cashflow = salaryTakeHome + pensionY + excessToInv - (currentExpenses + houseExpAdj) - nonConc;
       if (cashflow >= 0) {
         annualSavings = cashflow;
-        if (mortgageActive && extraRepaymentPct > 0) {
-          extraRepaymentReal = annualSavings * extraRepaymentPct;
+        if (mortgageActive && extraRepaymentPct > 0 && annualSavings > 0) {
+          const desiredExtraReal = annualSavings * extraRepaymentPct;
+          const fullAmort = amortizeMortgageYear(loanBalance, mortgageRate, monthlyBasePmt, desiredExtraReal * infFromBuy);
+          extraRepaymentReal = fullAmort.extraPaid / infFromBuy;
           annualSavings -= extraRepaymentReal;
+          loanBalance = fullAmort.endBalance;
+        } else if (mortgageActive) {
+          loanBalance = baseAmort.endBalance;
         }
       } else {
+        if (mortgageActive) loanBalance = baseAmort.endBalance;
         let deficit = -cashflow;
         const c = Math.min(deficit, cash); cash -= c; deficit -= c; cashDraw = c;
         const i = Math.min(deficit, inv);  inv  -= i; deficit -= i; invDraw = i;
@@ -367,35 +588,55 @@ function project(inp, opts = {}) {
         }
         if (deficit > 1 && !failed) { failed = true; depleteAge = age; }
       }
+      if (mortgageActive && loanBalance <= 0 && mortgagePaidAge == null) mortgagePaidAge = age + 1;
+
+      // Investment & cash tax on nominal returns (post-drawdown base)
+      const invEndBase  = Math.max(0, inv);
+      const cashEndBase = Math.max(0, cash);
+      const invTaxRes = calcInvAndCashTax(
+        invEndBase, cashEndBase,
+        p1Tax.taxable + p1PenTaxable, p2Tax.taxable + p2PenTaxable,
+        p1Salary + p1PenTaxable, p2Salary + p2PenTaxable,
+        age, p2AgeNow, rInv
+      );
+      invTax = invTaxRes.invTax;
 
       const p1Conc = p1SG + p1Sac, p2Conc = p2SG + p2Sac;
-      const p1SuperTax = p1Conc * 0.15 + div293Tax(p1Tax.taxable, p1Conc);
-      const p2SuperTax = p2Conc * 0.15 + div293Tax(p2Tax.taxable, p2Conc);
+      const p1SuperTax = p1Conc * 0.15 + div293Tax(p1Tax.taxable + invTaxRes.p1InvInc, p1Conc);
+      const p2SuperTax = p2Conc * 0.15 + div293Tax(p2Tax.taxable + invTaxRes.p2InvInc, p2Conc);
+      superTax = p1SuperTax + p2SuperTax;
       const p1ConcNet  = p1Conc - p1SuperTax;
       const p2ConcNet  = p2Conc - p2SuperTax;
       netSuperContrib  = p1ConcNet + p2ConcNet + nonConc;
 
-      // Employer SG must stay with the earner; your extra contributions can
-      // be routed (contribution splitting / spouse contributions)
-      const p1SGNet    = p1Conc > 0 ? p1ConcNet * (p1SG / p1Conc) : 0;
-      const p1ExtraNet = (p1ConcNet - p1SGNet) + nonConc;
+      // Employer SG stays with earner; salary sacrifice only routes to an eligible (non-retired) spouse
+      const p1SGNet  = p1Conc > 0 ? p1ConcNet * (p1SG / p1Conc) : 0;
+      const p1SacNet = p1ConcNet - p1SGNet;
       let toSup1 = p1SGNet, toSup2 = p2ConcNet;
-      if (couple && contribTarget === 'partner')    toSup2 += p1ExtraNet;
-      else if (couple && contribTarget === 'split') { toSup1 += p1ExtraNet / 2; toSup2 += p1ExtraNet / 2; }
-      else                                          toSup1 += p1ExtraNet;
+      if (couple && contribTarget === 'partner' && !p2Can) toSup2 += p1SacNet;
+      else if (couple && contribTarget === 'split' && !p2Can) { toSup1 += p1SacNet / 2; toSup2 += p1SacNet / 2; }
+      else toSup1 += p1SacNet;
 
-      // Investment distributions + cash interest, taxed at the holder's rate.
-      // Balances are in real dollars grown at real rates, so use real returns here.
-      const assessable = inv * rInv * taxableShare + cash * realCashR;
-      invTax = investmentTax(assessable, p1Tax.taxable, p2Tax.taxable, age, p2AgeNow);
+      if (nonConc > 0) {
+        if (couple && contribTarget === 'partner' && p2NccOk) toSup2 += nonConc;
+        else if (couple && contribTarget === 'split') {
+          if (p1NccOk && p2NccOk) { toSup1 += nonConc / 2; toSup2 += nonConc / 2; }
+          else if (p2NccOk) toSup2 += nonConc;
+          else toSup1 += nonConc;
+        } else {
+          toSup1 += nonConc;
+        }
+      }
 
+      const totHecs = p1Repay + p2Repay + invTaxRes.p1HecsDelta + invTaxRes.p2HecsDelta;
       annualTax = {
         taxable: p1Tax.taxable + p2Tax.taxable,
         raw:   p1Tax.raw + p2Tax.raw,
         hecs:  p1Repay + p2Repay,
         total: p1Tax.raw + p2Tax.raw + p1Repay + p2Repay,
-        net:   takeHome,
+        net:   salaryTakeHome,
         p1Net: p1Tax.net + (p1Tax.hecs - p1Repay), p1Raw: p1Tax.raw, p1Hecs: p1Repay,
+        totHecs,
       };
       sgContrib = p1SG + p2SG;
       extraConc = p1Sac;
@@ -406,68 +647,69 @@ function project(inp, opts = {}) {
       cash = Math.max(0, cash) * (1 + realCashR);
 
     } else {
-      // Full retirement path — no part-time income assumed here.
-      // Later-life spending reduction (go-go / slow-go)
+      // Full retirement path — no part-time income assumed for primary here.
       const expReal = (fullExpenses + houseExpAdj) * (slowGoPct > 0 && age >= slowGoAge ? 1 - slowGoPct : 1);
 
-      // Partner may still be working after the primary retires
-      let p2ToSup1 = 0, p2ToSup2 = 0;
-      let p2Net = 0, p2SalaryNow = 0, p2TaxableNow = 0;
+      let p2ToSup2 = 0;
+      let p2Net = 0, p2SalaryNow = 0, p2TaxableNow = 0, p2ConcNow = 0;
+      let p2TaxObj = { net: 0, raw: 0, hecs: 0, total: 0, taxable: 0 }, p2Repay = 0;
       if (p2Working) {
         p2SalaryNow = growSalary ? partnerSalary : partnerSalary / infAdj;
-        const p2SG  = p2SalaryNow * sgRate;
+        const p2SG  = Math.min(p2SalaryNow, MAX_SG_BASE) * sgRate;
         const p2BaseCap = Math.max(0, CONCESSIONAL_CAP - p2SG);
-        const p2Sac = Math.min(partnerExtraConcessional, p2BaseCap + p2CarryFwd);
+        const p2EligibleCF = sup2 < CARRY_FWD_TSB_LIMIT ? p2CarryFwd : 0;
+        const p2Sac = Math.max(0, Math.min(partnerExtraConcessional, p2SalaryNow, p2BaseCap + p2EligibleCF));
         if (p2Sac > p2BaseCap) p2CarryFwd = Math.max(0, p2CarryFwd - (p2Sac - p2BaseCap));
-        const p2Tax = calcTax(p2SalaryNow, p2Sac, p2Help > 0,
-          { noPHI: !privateHealth, family: couple, mlsCombined: p2SalaryNow, isSenior: p2AgeNow >= AGE_PENSION_AGE });
-        const p2Repay = Math.min(p2Tax.hecs, p2Help);
+        p2TaxObj = calcTax(p2SalaryNow, p2Sac, p2Help > 0,
+          { noPHI: !privateHealth, family: couple, mlsCombined: p2SalaryNow, isSenior: p2Eligible });
+        p2Repay = Math.min(p2TaxObj.hecs, p2Help);
         p2Help -= p2Repay;
-        p2Net = p2Tax.net + (p2Tax.hecs - p2Repay);
-        p2TaxableNow = p2Tax.taxable;
-        const p2Conc = p2SG + p2Sac;
-        const p2SuperTax = p2Conc * 0.15 + div293Tax(p2Tax.taxable, p2Conc);
-        const p2ConcNet = p2Conc - p2SuperTax;
-        netSuperContrib = p2ConcNet;
+        if (partnerHecsActive && partnerHelpPaidOffAge == null && p2Help <= 0) partnerHelpPaidOffAge = age;
+        p2Net = p2TaxObj.net + (p2TaxObj.hecs - p2Repay);
+        p2TaxableNow = p2TaxObj.taxable;
+        p2ConcNow = p2SG + p2Sac;
         sgContrib = p2SG;
         extraConc = p2Sac;
-        
-        const p2SGNet    = p2Conc > 0 ? p2ConcNet * (p2SG / p2Conc) : 0;
-        const p2ExtraNet = p2ConcNet - p2SGNet;
-        p2ToSup2 = p2SGNet;
-        if (couple && contribTarget === 'mine')       p2ToSup1 += p2ExtraNet;
-        else if (couple && contribTarget === 'split') { p2ToSup1 += p2ExtraNet / 2; p2ToSup2 += p2ExtraNet / 2; }
-        else                                          p2ToSup2 += p2ExtraNet;
-
-        annualTax = {
-          taxable: p2Tax.taxable,
-          raw: p2Tax.raw,
-          hecs: p2Repay,
-          total: p2Tax.raw + p2Repay,
-          net: p2Net,
-          p1Net: 0, p1Raw: 0, p1Hecs: 0,
-        };
-      } else {
-        annualTax = { taxable: 0, raw: 0, hecs: 0, total: 0, net: 0, p1Net: 0, p1Raw: 0, p1Hecs: 0 };
       }
       householdNet = p2Net;
 
       // Age Pension: per-person eligibility; an under-pension-age partner's
       // untapped accumulation super is exempt from both means tests
-      const p1Eligible = age >= AGE_PENSION_AGE;
-      const p2Eligible = couple && p2AgeNow >= AGE_PENSION_AGE;
       if (includeAgePension && (p1Eligible || p2Eligible)) {
         const assessable = inv + cash
           + ((p1Eligible || p1Tapped) ? sup1 : 0)
           + ((p2Eligible || p2Tapped) ? sup2 : 0);
         pensionY = agePensionEstimate(assessable, isHomeowner, couple, {
           bothEligible: couple ? (p1Eligible && p2Eligible) : true,
-          otherIncome: p2SalaryNow,
+          p1WorkIncome: 0,
+          p2WorkIncome: p2SalaryNow,
+          p1Eligible,
+          p2Eligible,
         });
       }
+      const [p1PenTaxable, p2PenTaxable] = !couple ? [pensionY, 0]
+        : (p1Eligible && p2Eligible) ? [pensionY / 2, pensionY / 2]
+        : p1Eligible ? [pensionY, 0] : [0, pensionY];
 
       let needed = expReal - p2Net - pensionY;
-      if (needed < 0) { annualSavings = -needed; inv += -needed; needed = 0; } // surplus income reinvested
+      let surplusToInv = 0;
+      if (needed < 0) {
+        annualSavings = -needed;
+        if (mortgageActive && extraRepaymentPct > 0 && annualSavings > 0) {
+          const desiredExtraReal = annualSavings * extraRepaymentPct;
+          const fullAmort = amortizeMortgageYear(loanBalance, mortgageRate, monthlyBasePmt, desiredExtraReal * infFromBuy);
+          extraRepaymentReal = fullAmort.extraPaid / infFromBuy;
+          annualSavings -= extraRepaymentReal;
+          loanBalance = fullAmort.endBalance;
+        } else if (mortgageActive) {
+          loanBalance = baseAmort.endBalance;
+        }
+        surplusToInv = annualSavings;
+        needed = 0;
+      } else if (mortgageActive) {
+        loanBalance = baseAmort.endBalance;
+      }
+      if (mortgageActive && loanBalance <= 0 && mortgagePaidAge == null) mortgagePaidAge = age + 1;
 
       // Draw from pension-phase super, oldest owner first — leaving the
       // younger partner's super in accumulation (growing and pension-exempt)
@@ -493,24 +735,42 @@ function project(inp, opts = {}) {
       if (needed > 0) { cashDraw = Math.min(needed, cash); needed -= cashDraw; }
       if (needed > 1 && !failed) { failed = true; depleteAge = age; }
 
-      // Investment income still taxed — at the holder's (now low) rate.
-      // Balances are in real dollars, so use real returns.
-      const assessable = inv * rInv * taxableShare + cash * realCashR;
-      invTax = investmentTax(assessable, 0, p2TaxableNow, age, p2AgeNow);
+      // Investment & cash income taxed on post-drawdown balances at nominal rates
+      const invEndBase  = Math.max(0, inv - invDraw);
+      const cashEndBase = Math.max(0, cash - cashDraw);
+      const invTaxRes = calcInvAndCashTax(
+        invEndBase, cashEndBase,
+        p1PenTaxable, p2TaxableNow + p2PenTaxable,
+        p1PenTaxable, p2SalaryNow + p2PenTaxable,
+        age, p2AgeNow, rInv
+      );
+      invTax = invTaxRes.invTax;
 
-      sup1 = growSuper(Math.max(0, sup1 + p2ToSup1), p1Tapped);
+      if (p2Working) {
+        const p2SuperTax = p2ConcNow * 0.15 + div293Tax(p2TaxableNow + invTaxRes.p2InvInc, p2ConcNow);
+        superTax = p2SuperTax;
+        p2ToSup2 = p2ConcNow - p2SuperTax;
+        netSuperContrib = p2ToSup2;
+        annualTax = {
+          taxable: p2TaxObj.taxable,
+          raw: p2TaxObj.raw,
+          hecs: p2Repay,
+          total: p2TaxObj.raw + p2Repay,
+          net: p2Net,
+          p1Net: 0, p1Raw: 0, p1Hecs: 0,
+          totHecs: p2Repay + invTaxRes.p1HecsDelta + invTaxRes.p2HecsDelta,
+        };
+      } else {
+        annualTax = {
+          taxable: 0, raw: 0, hecs: 0, total: 0, net: 0, p1Net: 0, p1Raw: 0, p1Hecs: 0,
+          totHecs: invTaxRes.p1HecsDelta + invTaxRes.p2HecsDelta,
+        };
+      }
+
+      sup1 = growSuper(Math.max(0, sup1), p1Tapped);
       sup2 = growSuper(Math.max(0, sup2 + p2ToSup2), p2Tapped);
-      inv  = Math.max(0, inv - invDraw + excessToInv) * (1 + rInv);
-      cash = Math.max(0, cash - cashDraw)             * (1 + realCashR);
-    }
-
-    // Amortize the mortgage: interest accrues in nominal terms, then the base
-    // repayment and any extra repayment (converted back to nominal $) pay it down.
-    // Payoff age is recorded the first year the balance actually reaches zero.
-    if (mortgageActive) {
-      const extraRepaymentNominal = extraRepaymentReal * Math.pow(1 + inflation, age - houseBuyAge);
-      loanBalance = loanBalance * (1 + mortgageRate) - mortgageRepaymentNominal - extraRepaymentNominal;
-      if (loanBalance <= 0) { loanBalance = 0; mortgagePaidAge = age + 1; }
+      inv  = Math.max(0, inv - invDraw + surplusToInv + excessToInv) * (1 + rInv);
+      cash = Math.max(0, cash - cashDraw) * (1 + realCashR);
     }
 
     // Settle this year's tax on investment/cash income
@@ -524,40 +784,46 @@ function project(inp, opts = {}) {
     totalsReal.push(total);
 
     if (!light) {
-      const accessible = (p1Can ? sup1 : 0) + (p2AgeNow >= PRESERVATION_AGE ? sup2 : 0) + inv + cash;
+      const p1Unlocked = age >= PRESERVATION_AGE;
+      const p2Unlocked = couple && p2AgeNow >= PRESERVATION_AGE;
+      const accessible = (p1Unlocked ? sup1 : 0) + (p2Unlocked ? sup2 : 0) + inv + cash;
+      const lockedSup1 = p1Unlocked ? 0 : sup1;
+      const lockedSup2 = (!couple || p2Unlocked) ? 0 : sup2;
 
-      const supAll = sup1 + sup2;
-      const yToPreserv = Math.max(0, PRESERVATION_AGE - age);
-      // Effective expenses at this age: once house is bought, rent is gone;
-      // during mortgage, repayment replaces rent; after payoff, just no rent.
-      const effFull    = Math.max(0, fullExpenses    + houseExpAdj);
-      const effLean    = Math.max(0, leanExpenses    + houseExpAdj);
-      const effBarista = Math.max(0, baristaExpenses + houseExpAdj);
-      const leanTgt = age >= PRESERVATION_AGE ? fiNumber(effLean, swr)
-        : earlyFIBridge(effLean, supAll, yToPreserv, realR, realSupR, swr);
-      // Barista target: fund full barista expenses, offset by the PV of
-      // part-time income earned from now until baristaStopAge
-      const bIncPV  = annuityPV(baristaIncome, Math.max(0, baristaStopAge - age), realR);
-      const bBase   = age >= PRESERVATION_AGE ? fiNumber(effBarista, swr)
-        : earlyFIBridge(effBarista, supAll, yToPreserv, realR, realSupR, swr);
-      const baristaTgt = Math.max(0, bBase - bIncPV);
-      const fullTgt = age >= PRESERVATION_AGE ? fiNumber(effFull, swr)
-        : earlyFIBridge(effFull, supAll, yToPreserv, realR, realSupR, swr);
-      const checkW = age >= PRESERVATION_AGE ? total : accessible;
+      const paidAgeEst = mortgagePaidAge ?? (mortgageTerm > 0 ? effHouseBuyAge + mortgageTerm : null);
 
-      // Coast target: full FIRE number discounted back to now. Pre-60, only
-      // liquid assets can fund the bridge to preservation age — super is
-      // locked and must be checked via earlyFIBridge like the other
-      // milestones, not just discounted as part of one undifferentiated total.
-      const coastNow = retirementAge >= PRESERVATION_AGE
-        ? coastTarget(fiAtRetirement, Math.max(0, retirementAge - age), realR)
-        : earlyFIBridge(effFull, supAll, yToPreserv, realR, realSupR, swr);
-      const coastCheckW = retirementAge >= PRESERVATION_AGE ? total : accessible;
+      const leanTgt = houseAwareTarget(inp, leanExpenses, age, p2AgeNow, lockedSup1, lockedSup2, realR, realSupR, swr, paidAgeEst);
+      const baristaTgt = houseAwareTarget(inp, baristaExpenses, age, p2AgeNow, lockedSup1, lockedSup2, realR, realSupR, swr, paidAgeEst, baristaNet, baristaStopAge);
+      const fullTgt = houseAwareTarget(inp, fullExpenses, age, p2AgeNow, lockedSup1, lockedSup2, realR, realSupR, swr, paidAgeEst);
 
-      if (!leanAge    && checkW >= leanTgt)    leanAge    = age;
-      if (!coastAge   && coastCheckW >= coastNow) coastAge = age;
-      if (!baristaAge && checkW >= baristaTgt) baristaAge = age;
-      if (!fullAge    && checkW >= fullTgt)    fullAge    = age;
+      // Coast target: wealth needed today so with $0 further contributions it hits the FI target at retirementAge.
+      let coastNow;
+      let coastCheckW;
+      const yrsToRet = Math.max(0, retirementAge - age);
+      const p2AtRet = couple ? partnerAge + (retirementAge - currentAge) : 0;
+      if (yrsToRet === 0) {
+        coastNow = fullTgt;
+        coastCheckW = accessible;
+      } else if (retirementAge >= PRESERVATION_AGE && (!couple || p2AtRet >= PRESERVATION_AGE)) {
+        const fiAtRet = houseAwareTarget(inp, fullExpenses, retirementAge, p2AtRet, 0, 0, realR, realSupR, swr, paidAgeEst);
+        coastNow = coastTarget(fiAtRet, yrsToRet, realR);
+        coastCheckW = total;
+      } else {
+        const sup1AtRet = retirementAge < PRESERVATION_AGE ? sup1 * Math.pow(1 + realSupR, yrsToRet) : 0;
+        const sup2AtRet = (couple && p2AtRet < PRESERVATION_AGE) ? sup2 * Math.pow(1 + realSupR, yrsToRet) : 0;
+        const liquidAtRetNeeded = houseAwareTarget(
+          inp, fullExpenses, retirementAge, p2AtRet, sup1AtRet, sup2AtRet, realR, realSupR, swr, paidAgeEst
+        );
+        coastNow = liquidAtRetNeeded / Math.pow(1 + realR, yrsToRet);
+        coastCheckW = (retirementAge >= PRESERVATION_AGE ? sup1 : (p1Unlocked ? sup1 : 0))
+          + (couple && p2AtRet >= PRESERVATION_AGE ? sup2 : (p2Unlocked ? sup2 : 0))
+          + inv + cash;
+      }
+
+      if (!leanAge    && accessible >= leanTgt)    leanAge    = age;
+      if (!coastAge   && coastCheckW >= coastNow)  coastAge   = age;
+      if (!baristaAge && accessible >= baristaTgt) baristaAge = age;
+      if (!fullAge    && accessible >= fullTgt)    fullAge    = age;
 
       rows.push({
         age, yr, infAdj, retired,
@@ -565,9 +831,9 @@ function project(inp, opts = {}) {
         invReal: inv, cashReal: cash,
         accessibleReal: accessible,
         coastNow, leanTgt, baristaTgt, fullTgt,
-        annualSavings, sgContrib, extraConc, netSuperContrib, annualTax, invTax,
+        annualSavings, sgContrib, extraConc, netSuperContrib, annualTax, invTax, superTax,
         pension: pensionY, supDraw, invDraw, cashDraw, householdNet,
-        houseExpAdj, mortgageRepaymentReal,
+        houseExpAdj, mortgageRepaymentReal, mortgageActive, isHouseOwned: isHomeowner,
       });
     }
   }
@@ -580,10 +846,7 @@ function project(inp, opts = {}) {
 
   const bridgeAtRetirement = retirementAge >= PRESERVATION_AGE ? 0 : (() => {
     const retRow = rows.find(r => r.age === retirementAge);
-    if (!retRow) return 0;
-    // Use effective post-purchase expense level if house has been bought by retirement
-    const effExp = Math.max(0, fullExpenses + (retRow.houseExpAdj ?? 0));
-    return earlyFIBridge(effExp, retRow.supReal, PRESERVATION_AGE - retirementAge, realR, realSupR, swr);
+    return retRow ? retRow.fullTgt : 0;
   })();
 
   return {
@@ -591,15 +854,14 @@ function project(inp, opts = {}) {
     milestones: { leanAge, coastAge, baristaAge, fullAge, retireBefore60: retirementAge < PRESERVATION_AGE, mortgagePaidAge },
     targets: {
       fi, leanFI,
-      // At-retirement effective FI accounts for post-purchase expense change
       fiEff:     rows.find(r => r.age === retirementAge)?.fullTgt    ?? fi,
       leanFIEff: rows.find(r => r.age === retirementAge)?.leanTgt    ?? leanFI,
-      baristaFI: rows[0] ? rows[0].baristaTgt : fiNumber(Math.max(0, baristaExpenses - baristaIncome), swr),
+      baristaFI: rows[0] ? rows[0].baristaTgt : fiNumber(Math.max(0, baristaExpenses - baristaNet), swr),
     },
     bridgeAtRetirement,
     currentTax: rows[0]?.annualTax || {},
     currentSavings: rows[0]?.annualSavings || 0,
-    depleteAge, failed, helpPaidOffAge,
+    depleteAge, failed, helpPaidOffAge, partnerHelpPaidOffAge,
   };
 }
 
@@ -653,6 +915,9 @@ function runMonteCarlo(inp, nSims = 400) {
 
 function projectPartner(inp, p1Net) {
   if (!inp.couple || !inp.partnerAge) return null;
+  const totalSal = (inp.grossSalary || 0) + (inp.partnerSalary || 0);
+  const p2Share = inp.partnerSalary > 0 ? (totalSal > 0 ? inp.partnerSalary / totalSal : 0.5) : 0;
+  const houseActive = inp.houseDeposit > 0 || inp.mortgageAmount > 0;
   return project({
     ...inp,
     currentAge:           inp.partnerAge,
@@ -669,14 +934,16 @@ function projectPartner(inp, p1Net) {
     cashBalance:          inp.partnerCashBalance   || 0,
     partnerInvestBalance: 0,
     partnerCashBalance:   0,
-    // Each person pays their share of household expenses while both work;
-    // FI targets stay household-level: "can partner's wealth sustain the household alone?"
-    currentExpenses:      inp.currentExpenses * 0.5,
+    currentExpenses:      inp.currentExpenses * p2Share,
     extraConcessional:    inp.partnerExtraConcessional || 0,
     carryForwardCap:      inp.partnerCarryForwardCap || 0,
     partnerCarryForwardCap: 0,
     extraNonConcessional: 0,
     windfallAmount: 0, oneOffAmount: 0,
+    houseBuyAge:    houseActive ? inp.partnerAge + Math.max(0, inp.houseBuyAge - inp.currentAge) : 0,
+    houseDeposit:   houseActive ? inp.houseDeposit * 0.5 : 0,
+    mortgageAmount: houseActive ? inp.mortgageAmount * 0.5 : 0,
+    rentSaving:     houseActive ? inp.rentSaving * 0.5 : 0,
     leanExpenses:         Math.max(0, inp.leanExpenses - p1Net),
     baristaExpenses:      Math.max(0, inp.baristaExpenses - p1Net),
     fullExpenses:         Math.max(0, inp.fullExpenses - p1Net),
@@ -684,7 +951,10 @@ function projectPartner(inp, p1Net) {
 }
 
 function projectPrimary(inp, p2Net) {
-  if (!inp.couple || inp.grossSalary <= 0) return null;
+  if (!inp.couple) return null;
+  const totalSal = (inp.grossSalary || 0) + (inp.partnerSalary || 0);
+  const p1Share = inp.grossSalary > 0 ? (totalSal > 0 ? inp.grossSalary / totalSal : 0.5) : 0;
+  const houseActive = inp.houseDeposit > 0 || inp.mortgageAmount > 0;
   return project({
     ...inp,
     partnerSalary:        0,
@@ -694,8 +964,11 @@ function projectPrimary(inp, p2Net) {
     partnerCarryForwardCap: 0,
     partnerInvestBalance: 0,
     partnerCashBalance:   0,
-    currentExpenses:      inp.currentExpenses * 0.5,
+    currentExpenses:      inp.currentExpenses * p1Share,
     windfallAmount: 0, oneOffAmount: 0,
+    houseDeposit:   houseActive ? inp.houseDeposit * 0.5 : 0,
+    mortgageAmount: houseActive ? inp.mortgageAmount * 0.5 : 0,
+    rentSaving:     houseActive ? inp.rentSaving * 0.5 : 0,
     leanExpenses:         Math.max(0, inp.leanExpenses - p2Net),
     baristaExpenses:      Math.max(0, inp.baristaExpenses - p2Net),
     fullExpenses:         Math.max(0, inp.fullExpenses - p2Net),
@@ -706,8 +979,13 @@ function projectPrimary(inp, p2Net) {
 //  FORMATTING HELPERS
 // ══════════════════════════════════════════════════════════
 
-const fmt  = n => n == null ? '—' : '$' + Math.round(n).toLocaleString('en-AU');
-const fmtK = n => n == null ? '—' : (n >= 1e6 ? '$' + (n / 1e6).toFixed(2) + 'M' : '$' + Math.round(n / 1000) + 'K');
+const fmt  = n => n == null ? '—' : (n < 0 ? '-$' : '$') + Math.round(Math.abs(n)).toLocaleString('en-AU');
+const fmtK = n => {
+  if (n == null) return '—';
+  const sign = n < 0 ? '-' : '';
+  const abs = Math.abs(n);
+  return sign + (abs >= 1e6 ? '$' + (abs / 1e6).toFixed(2) + 'M' : '$' + Math.round(abs / 1000) + 'K');
+};
 const pct  = n => (n * 100).toFixed(1) + '%';
 
 // ══════════════════════════════════════════════════════════
@@ -747,18 +1025,21 @@ function saveState() {
   try {
     const data = JSON.stringify(collectFormValues());
     localStorage.setItem(STORAGE_KEY, data);
-    // Also save to a cookie that expires in 1 year (31,536,000 seconds)
-    document.cookie = `${STORAGE_KEY}=${encodeURIComponent(data)}; max-age=31536000; path=/; SameSite=Strict`;
   } catch (_) {}
 }
 
 function loadState() {
   try {
-    let savedStr = null;
+    let savedStr = localStorage.getItem(STORAGE_KEY);
+    // One-time migration from legacy cookie to localStorage, then remove cookie
     const cookieMatch = document.cookie.match(new RegExp('(^| )' + STORAGE_KEY + '=([^;]+)'));
-    if (cookieMatch) savedStr = decodeURIComponent(cookieMatch[2]);
-    if (!savedStr) savedStr = localStorage.getItem(STORAGE_KEY);
-
+    if (cookieMatch) {
+      if (!savedStr) {
+        savedStr = decodeURIComponent(cookieMatch[2]);
+        localStorage.setItem(STORAGE_KEY, savedStr);
+      }
+      document.cookie = `${STORAGE_KEY}=; max-age=0; path=/; SameSite=Strict`;
+    }
     const saved = JSON.parse(savedStr);
     if (!saved) return false;
     applyFormValues(saved);
@@ -775,33 +1056,69 @@ function applyUrlParams() {
   return true;
 }
 
+let _toastTimer;
+function showToast(msg, type = 'good') {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = `toast show ${type}`;
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { el.classList.remove('show'); }, 2400);
+}
+
+function focusMilestone(cardId) {
+  const el = document.getElementById(cardId);
+  if (!el) return;
+  el.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  el.classList.remove('pulse-highlight');
+  void el.offsetWidth;
+  el.classList.add('pulse-highlight');
+  setTimeout(() => el.classList.remove('pulse-highlight'), 950);
+}
+
+const SVG_CHECK = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34D399" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+const SVG_SUN   = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
+const SVG_MOON  = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+
 function shareLink() {
   const p = new URLSearchParams();
   document.querySelectorAll('.input-panel input[id], .input-panel select[id]').forEach(el => {
     p.set(el.id, el.type === 'checkbox' ? (el.checked ? '1' : '0') : el.value);
   });
-  const url = location.origin + location.pathname + '?' + p.toString();
+  const base = (location.origin && location.origin !== 'null')
+    ? (location.origin + location.pathname)
+    : location.href.split('?')[0];
+  const url = base + '?' + p.toString();
   const btn = document.getElementById('share-btn');
   const done = () => {
+    showToast('Shareable link copied to clipboard');
     if (!btn) return;
-    const orig = btn.textContent;
-    btn.textContent = '✓';
-    setTimeout(() => { btn.textContent = orig; }, 1500);
+    const orig = btn.innerHTML;
+    btn.innerHTML = SVG_CHECK;
+    setTimeout(() => { btn.innerHTML = orig; }, 1500);
   };
   if (navigator.clipboard?.writeText) navigator.clipboard.writeText(url).then(done, () => prompt('Copy this link:', url));
   else prompt('Copy this link:', url);
 }
 
 function copyAuditLogs() {
-  if (!window._lastAuditLog) return alert('No logs generated yet.');
+  if (!_lastInp || !_lastResult) return showToast('No diagnostic logs generated yet');
+  const auditLog = [
+    '🔥 FIRE Calculator Audit Logs (Calculations & Output)',
+    '1. Parsed Inputs:\n' + JSON.stringify(_lastInp, null, 2),
+    '2. Base Projection Result:\n' + JSON.stringify(_lastResult, null, 2),
+    '3. Monte Carlo Result:\n' + JSON.stringify(_lastMc, null, 2),
+    _lastInp.couple ? '4. Partner Projection Result:\n' + JSON.stringify(_lastPartnerResult, null, 2) : '',
+    _lastInp.couple ? '5. Primary Individual Projection Result:\n' + JSON.stringify(_lastPrimaryResult, null, 2) : ''
+  ].filter(Boolean).join('\n\n');
   if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(window._lastAuditLog).then(() => {
-      alert('✅ Diagnostic audit logs copied to clipboard!');
+    navigator.clipboard.writeText(auditLog).then(() => {
+      showToast('Diagnostic audit logs copied to clipboard');
     }).catch(() => {
-      prompt('Your browser blocked clipboard access. Copy the logs here:', window._lastAuditLog);
+      prompt('Your browser blocked clipboard access. Copy the logs here:', auditLog);
     });
   } else {
-    prompt('Copy the logs here:', window._lastAuditLog);
+    prompt('Copy the logs here:', auditLog);
   }
 }
 
@@ -809,32 +1126,38 @@ function resetDefaults() {
   if (!confirm('Reset all inputs to defaults?')) return;
   localStorage.removeItem(STORAGE_KEY);
   document.cookie = `${STORAGE_KEY}=; max-age=0; path=/; SameSite=Strict`;
-  location.href = location.pathname; // also clears any shared-link params
+  location.href = location.href.split('?')[0];
 }
 
 function exportCSV() {
   if (!_lastRows.length) return;
-  const cols = ['Age', 'Phase', 'Net income', 'Tax', 'Savings to investments', 'Net super contributions',
-    'Age pension', 'Mortgage repayment', 'Super drawdown', 'Investment drawdown', 'Cash drawdown',
-    'Super balance', 'Investments', 'Cash', 'Total wealth'];
+  const isCouple = !!_lastInp?.couple;
+  const cols = ['Age', ...(isCouple ? ['Partner age'] : []), 'Phase', 'Net income', 'Income & inv tax', 'Super tax',
+    'Savings to investments', 'Net super contributions', 'Age pension', 'Mortgage repayment',
+    'Super drawdown', 'Investment drawdown', 'Cash drawdown', 'Super balance', 'Investments', 'Cash', 'Total wealth'];
   const lines = [cols.join(',')];
   _lastRows.forEach(r => {
+    const p2Age = _lastInp.partnerAge + r.yr;
     lines.push([
-      r.age, r.retired ? 'Retired' : 'Working',
+      r.age,
+      ...(isCouple ? [p2Age] : []),
+      r.retired ? 'Retired' : 'Working',
       Math.round(r.annualTax.net ?? r.householdNet),
       Math.round((r.annualTax.total ?? 0) + (r.invTax ?? 0)),
+      Math.round(r.superTax ?? 0),
       Math.round(r.annualSavings), Math.round(r.netSuperContrib),
       Math.round(r.pension), Math.round(r.mortgageRepaymentReal ?? 0),
       Math.round(r.supDraw), Math.round(r.invDraw), Math.round(r.cashDraw),
       Math.round(r.supReal), Math.round(r.invReal), Math.round(r.cashReal), Math.round(r.totalReal),
     ].join(','));
   });
-  const blob = new Blob(["All values in today's dollars\n" + lines.join('\n')], { type: 'text/csv' });
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'fire-projection.csv';
   a.click();
   URL.revokeObjectURL(a.href);
+  showToast('Exported fire-projection.csv');
 }
 
 // ══════════════════════════════════════════════════════════
@@ -843,28 +1166,36 @@ function exportCSV() {
 
 function isDark() { return document.body.classList.contains('dark'); }
 
+function updateDarkToggleIcon(dark) {
+  const btn = document.getElementById('dark-toggle');
+  if (btn) btn.innerHTML = dark ? SVG_SUN : SVG_MOON;
+}
+
 function toggleDark() {
   const dark = document.body.classList.toggle('dark');
   localStorage.setItem('au-fire-dark', dark ? '1' : '0');
-  document.cookie = `au-fire-dark=${dark ? '1' : '0'}; max-age=31536000; path=/; SameSite=Strict`;
-  document.getElementById('dark-toggle').textContent = dark ? '☀️' : '🌙';
-  Chart.defaults.color = dark ? '#9CA3AF' : '#718096';
+  updateDarkToggleIcon(dark);
+  Chart.defaults.color = dark ? '#94A3B8' : '#64748B';
   _calc();
 }
 
 function initDark() {
-  let darkStr = null;
+  let darkStr = localStorage.getItem('au-fire-dark');
   const cookieMatch = document.cookie.match(/(^| )au-fire-dark=([^;]+)/);
-  if (cookieMatch) darkStr = cookieMatch[2];
-  if (!darkStr) darkStr = localStorage.getItem('au-fire-dark');
+  if (cookieMatch) {
+    if (!darkStr) {
+      darkStr = cookieMatch[2];
+      localStorage.setItem('au-fire-dark', darkStr);
+    }
+    document.cookie = 'au-fire-dark=; max-age=0; path=/; SameSite=Strict';
+  }
 
   const dark = darkStr === '1';
   if (dark) {
     document.body.classList.add('dark');
-    Chart.defaults.color = '#9CA3AF';
+    Chart.defaults.color = '#94A3B8';
   }
-  const btn = document.getElementById('dark-toggle');
-  if (btn) btn.textContent = dark ? '☀️' : '🌙';
+  updateDarkToggleIcon(dark);
 }
 
 // ══════════════════════════════════════════════════════════
@@ -932,51 +1263,52 @@ function updateConditionalUI() {
 function getInputs() {
   const g   = id => document.getElementById(id);
   const num = id => { const el = g(id); return el ? (parseFloat(el.value) || 0) : 0; };
+  const pos = id => Math.max(0, num(id));
   const chk = id => { const el = g(id); return el ? el.checked : false; };
   const sel = id => { const el = g(id); return el ? el.value : ''; };
 
   const couple     = sel('status') === 'couple';
-  const partnerAge = parseInt(g('partnerAge')?.value, 10) || 30;
+  const partnerAge = Math.max(18, Math.min(70, parseInt(g('partnerAge')?.value, 10) || 30));
   const rawPRetire = parseInt(g('partnerRetirementAge')?.value, 10) || 55;
   const partnerRetirementAge = Math.max(partnerAge + 1, rawPRetire);
 
   const hasHECS            = chk('hasHECS');
-  const hecsBalance        = num('hecsBalance');
+  const hecsBalance        = pos('hecsBalance');
   const partnerHasHECS     = chk('partnerHasHECS');
-  const partnerHecsBalance = num('partnerHecsBalance');
+  const partnerHecsBalance = pos('partnerHecsBalance');
 
   const planHousePurchase = chk('planHousePurchase');
 
   return {
-    currentAge:    parseInt(g('currentAge').value, 10),
-    retirementAge: parseInt(g('retirementAge').value, 10),
-    grossSalary:   num('grossSalary'),
-    partnerSalary: couple ? num('partnerSalary') : 0,
-    sgRate:        num('sgRate') / 100,
-    extraConcessional:        num('extraConcessional'),
-    extraNonConcessional:     num('extraNonConcessional'),
-    partnerExtraConcessional: couple ? num('partnerExtraConcessional') : 0,
-    carryForwardCap:          num('carryForwardCap'),
-    partnerCarryForwardCap:   couple ? num('partnerCarryForwardCap') : 0,
-    currentExpenses:  num('currentExpenses'),
-    leanExpenses:     num('leanExpenses'),
-    baristaExpenses:  num('baristaExpenses'),
-    baristaIncome:    num('baristaIncome'),
-    baristaStopAge:   num('baristaStopAge') || 65,
-    fullExpenses:     num('fullExpenses'),
-    superBalance:         num('superBalance'),
-    partnerSuperBalance:  couple ? num('partnerSuperBalance') : 0,
-    investBalance:        num('investBalance'),
-    cashBalance:          num('cashBalance'),
-    partnerInvestBalance: couple ? num('partnerInvestBalance') : 0,
-    partnerCashBalance:   couple ? num('partnerCashBalance') : 0,
+    currentAge:    Math.max(18, Math.min(70, parseInt(g('currentAge').value, 10) || 35)),
+    retirementAge: parseInt(g('retirementAge').value, 10) || 55,
+    grossSalary:   pos('grossSalary'),
+    partnerSalary: couple ? pos('partnerSalary') : 0,
+    sgRate:        pos('sgRate') / 100,
+    extraConcessional:        pos('extraConcessional'),
+    extraNonConcessional:     pos('extraNonConcessional'),
+    partnerExtraConcessional: couple ? pos('partnerExtraConcessional') : 0,
+    carryForwardCap:          pos('carryForwardCap'),
+    partnerCarryForwardCap:   couple ? pos('partnerCarryForwardCap') : 0,
+    currentExpenses:  pos('currentExpenses'),
+    leanExpenses:     pos('leanExpenses'),
+    baristaExpenses:  pos('baristaExpenses'),
+    baristaIncome:    pos('baristaIncome'),
+    baristaStopAge:   pos('baristaStopAge') || 65,
+    fullExpenses:     pos('fullExpenses'),
+    superBalance:         pos('superBalance'),
+    partnerSuperBalance:  couple ? pos('partnerSuperBalance') : 0,
+    investBalance:        pos('investBalance'),
+    cashBalance:          pos('cashBalance'),
+    partnerInvestBalance: couple ? pos('partnerInvestBalance') : 0,
+    partnerCashBalance:   couple ? pos('partnerCashBalance') : 0,
     investReturn:  num('investReturn') / 100,
     superReturn:   num('superReturn')  / 100,
-    cashReturn:    num('cashReturn')   / 100,
-    inflation:     num('inflation')    / 100,
-    swr:           num('swr')          / 100,
-    taxableShare:  num('taxableShare') / 100,
-    retVol:        num('retVol')       / 100,
+    cashReturn:    pos('cashReturn')   / 100,
+    inflation:     pos('inflation')    / 100,
+    swr:           Math.max(0.01, num('swr') / 100),
+    taxableShare:  Math.min(1, pos('taxableShare') / 100),
+    retVol:        pos('retVol')       / 100,
     investHolder:  sel('investHolder') || 'lower',
     contribTarget: sel('contribTarget') || 'mine',
     includeAgePension: chk('includeAgePension'),
@@ -990,20 +1322,20 @@ function getInputs() {
     growSalary:    chk('salaryGrowth'),
     partnerAge,
     partnerRetirementAge,
-    slowGoAge:      num('slowGoAge') || 75,
-    slowGoPct:      num('slowGoPct') / 100,
-    windfallAmount: num('windfallAmount'),
-    windfallAge:    num('windfallAge'),
-    oneOffAmount:   num('oneOffAmount'),
-    oneOffAge:      num('oneOffAge'),
+    slowGoAge:      pos('slowGoAge') || 75,
+    slowGoPct:      Math.min(1, pos('slowGoPct') / 100),
+    windfallAmount: pos('windfallAmount'),
+    windfallAge:    pos('windfallAge'),
+    oneOffAmount:   pos('oneOffAmount'),
+    oneOffAge:      pos('oneOffAge'),
     planHousePurchase,
-    houseDeposit:   planHousePurchase ? num('houseDeposit') : 0,
-    houseBuyAge:    planHousePurchase ? (num('houseBuyAge') || 40) : 0,
-    mortgageAmount: planHousePurchase ? num('mortgageAmount') : 0,
-    rentSaving:     planHousePurchase ? num('rentSaving') : 0,
-    mortgageRate:   planHousePurchase ? num('mortgageRate') / 100 : 0,
-    mortgageTerm:   planHousePurchase ? (num('mortgageTerm') || 30) : 0,
-    extraRepaymentPct: planHousePurchase ? num('extraRepaymentPct') / 100 : 0,
+    houseDeposit:   planHousePurchase ? pos('houseDeposit') : 0,
+    houseBuyAge:    planHousePurchase ? (pos('houseBuyAge') || 40) : 0,
+    mortgageAmount: planHousePurchase ? pos('mortgageAmount') : 0,
+    rentSaving:     planHousePurchase ? pos('rentSaving') : 0,
+    mortgageRate:   planHousePurchase ? pos('mortgageRate') / 100 : 0,
+    mortgageTerm:   planHousePurchase ? (pos('mortgageTerm') || 30) : 0,
+    extraRepaymentPct: planHousePurchase ? Math.min(1, pos('extraRepaymentPct') / 100) : 0,
   };
 }
 
@@ -1019,44 +1351,77 @@ const taxOpts = inp => ({
 
 const charts = {};
 
-Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+Chart.defaults.font.family = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 Chart.defaults.font.size   = 11;
-Chart.defaults.color       = '#718096';
+Chart.defaults.color       = '#64748B';
 
-// Vertical milestone marker lines on the projection chart
+function chartTooltipOpts(extra = {}) {
+  return {
+    backgroundColor: 'rgba(15, 23, 42, 0.94)',
+    titleColor: '#F8FAFC',
+    bodyColor: '#CBD5E1',
+    borderColor: 'rgba(148, 163, 184, 0.22)',
+    borderWidth: 1,
+    cornerRadius: 10,
+    padding: 11,
+    boxPadding: 5,
+    usePointStyle: true,
+    ...extra,
+  };
+}
+
+// Vertical milestone marker lines with clean non-overlapping pill tags
 const msLinesPlugin = {
   id: 'msLines',
   afterDatasetsDraw(chart, args, options) {
     const lines = options.lines || [];
     const xs = chart.scales.x, area = chart.chartArea, ctx = chart.ctx;
+    const placed = [];
     lines.forEach(({ idx, color, label }) => {
       if (idx == null || idx < 0) return;
       const px = xs.getPixelForValue(idx);
       if (px < area.left || px > area.right) return;
       ctx.save();
       ctx.strokeStyle = color;
-      ctx.setLineDash([2, 3]);
-      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.72;
+      ctx.setLineDash([3, 4]);
+      ctx.lineWidth = 1.25;
       ctx.beginPath();
       ctx.moveTo(px, area.top);
       ctx.lineTo(px, area.bottom);
       ctx.stroke();
-      ctx.fillStyle = color;
-      ctx.font = '600 9px sans-serif';
-      ctx.textAlign = 'left';
-      ctx.translate(px, area.top);
-      ctx.rotate(Math.PI / 2);
-      ctx.fillText(label, 4, -4);
+      ctx.globalAlpha = 1;
+
+      ctx.font = '700 9.5px Inter, sans-serif';
+      const padX = 5, h = 15, w = ctx.measureText(label).width + padX * 2;
+      let yOffset = 4;
+      while (placed.some(p => Math.abs(p.x - px) < (p.w + w) / 2 + 4 && Math.abs(p.y - yOffset) < h + 3)) {
+        yOffset += h + 3;
+      }
+      if (yOffset + h < area.bottom - area.top) {
+        placed.push({ x: px, w, y: yOffset });
+        const boxX = Math.min(Math.max(px - w / 2, area.left + 2), area.right - w - 2);
+        const boxY = area.top + yOffset;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(boxX, boxY, w, h, 4);
+        else ctx.rect(boxX, boxY, w, h);
+        ctx.fill();
+        ctx.fillStyle = '#FFFFFF';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, boxX + w / 2, boxY + h / 2 + 0.5);
+      }
       ctx.restore();
     });
   },
 };
 Chart.register(msLinesPlugin);
 
-function gc() { return isDark() ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.04)'; }
+function gc() { return isDark() ? 'rgba(148, 163, 184, 0.08)' : 'rgba(15, 23, 42, 0.05)'; }
 
-function makeGradient(ctx, color, alpha1 = 0.3, alpha2 = 0.01) {
-  const g = ctx.createLinearGradient(0, 0, 0, 300);
+function makeGradient(ctx, color, alpha1 = 0.28, alpha2 = 0.01) {
+  const g = ctx.createLinearGradient(0, 0, 0, 320);
   g.addColorStop(0, color.replace('1)', `${alpha1})`));
   g.addColorStop(1, color.replace('1)', `${alpha2})`));
   return g;
@@ -1073,35 +1438,35 @@ function buildProjectionChart(data, milestones, targets, inp, mc) {
   const firstAge = data[0].age;
   const isD = isDark();
 
-  const totalGrad  = makeGradient(ctx, isD ? 'rgba(167,139,250,1)' : 'rgba(124,58,237,1)', 0.25, 0.02);
-  const superGrad  = makeGradient(ctx, isD ? 'rgba(251,191,36,1)' : 'rgba(180,83,9,1)',   0.20, 0.01);
-  const investGrad = makeGradient(ctx, isD ? 'rgba(96,165,250,1)' : 'rgba(37,99,235,1)',  0.20, 0.01);
+  const totalGrad  = makeGradient(ctx, isD ? 'rgba(167,139,250,1)' : 'rgba(124,58,237,1)', 0.24, 0.01);
+  const superGrad  = makeGradient(ctx, isD ? 'rgba(251,191,36,1)' : 'rgba(217,119,6,1)',   0.18, 0.01);
+  const investGrad = makeGradient(ctx, isD ? 'rgba(96,165,250,1)' : 'rgba(37,99,235,1)',  0.18, 0.01);
 
   const ds = [
-    { label: 'Total Wealth', data: data.map(r => r.totalReal), borderColor: isD ? '#A78BFA' : '#7C3AED', backgroundColor: totalGrad, fill: true, tension: 0.4, borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 5 },
-    { label: 'Super',        data: data.map(r => r.supReal),   borderColor: isD ? '#FBBF24' : '#B45309', backgroundColor: superGrad, fill: true, tension: 0.4, borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 4 },
-    { label: 'Investments',  data: data.map(r => r.invReal),   borderColor: isD ? '#60A5FA' : '#2563EB', backgroundColor: investGrad, fill: true, tension: 0.4, borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 4 },
+    { label: 'Total Wealth', data: data.map(r => r.totalReal), borderColor: isD ? '#A78BFA' : '#7C3AED', backgroundColor: totalGrad, fill: true, tension: 0.38, borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 5 },
+    { label: 'Super',        data: data.map(r => r.supReal),   borderColor: isD ? '#FBBF24' : '#D97706', backgroundColor: superGrad, fill: true, tension: 0.38, borderWidth: 1.75, pointRadius: 0, pointHoverRadius: 4 },
+    { label: 'Investments',  data: data.map(r => r.invReal),   borderColor: isD ? '#60A5FA' : '#2563EB', backgroundColor: investGrad, fill: true, tension: 0.38, borderWidth: 1.75, pointRadius: 0, pointHoverRadius: 4 },
     { label: 'Coast Target', data: data.map(r => r.coastNow),  borderColor: isD ? '#60A5FA' : '#2563EB', backgroundColor: 'transparent', fill: false, tension: 0.2, borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0 },
-    { label: `Full FIRE target (${fmtK(targets.fiEff)})`,    data: data.map(r => r.fullTgt),    borderColor: isD ? 'rgba(167,139,250,0.55)' : 'rgba(124,58,237,0.55)', fill: false, borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0 },
-    { label: `Lean FIRE target (${fmtK(targets.leanFIEff)})`, data: data.map(r => r.leanTgt),   borderColor: isD ? 'rgba(248,113,113,0.55)' : 'rgba(220,38,38,0.55)',  fill: false, borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0 },
-    { label: 'Barista FIRE target',                        data: data.map(r => r.baristaTgt), borderColor: isD ? 'rgba(52,211,153,0.55)' : 'rgba(5,150,105,0.55)', fill: false, borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0 },
+    { label: `Full FIRE target (${fmtK(targets.fiEff)})`,    data: data.map(r => r.fullTgt),    borderColor: isD ? 'rgba(167,139,250,0.6)' : 'rgba(124,58,237,0.55)', fill: false, borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0 },
+    { label: `Lean FIRE target (${fmtK(targets.leanFIEff)})`, data: data.map(r => r.leanTgt),   borderColor: isD ? 'rgba(251,113,133,0.6)' : 'rgba(225,29,72,0.55)',  fill: false, borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0 },
+    { label: 'Barista FIRE target',                        data: data.map(r => r.baristaTgt), borderColor: isD ? 'rgba(52,211,153,0.6)' : 'rgba(5,150,105,0.55)', fill: false, borderDash: [4, 4], borderWidth: 1.5, pointRadius: 0 },
   ];
 
   if (mc) {
     ds.push(
-      { label: '_p90', data: mc.p90, borderWidth: 0, pointRadius: 0, fill: '+1', backgroundColor: isD ? 'rgba(167,139,250,0.12)' : 'rgba(124,58,237,0.08)', tension: 0.4 },
-      { label: '_p10', data: mc.p10, borderWidth: 0, pointRadius: 0, fill: false, tension: 0.4 },
+      { label: '_p90', data: mc.p90, borderWidth: 0, pointRadius: 0, fill: '+1', backgroundColor: isD ? 'rgba(167,139,250,0.12)' : 'rgba(124,58,237,0.08)', tension: 0.38 },
+      { label: '_p10', data: mc.p10, borderWidth: 0, pointRadius: 0, fill: false, tension: 0.38 },
     );
   }
 
   const msLines = [
-    { age: milestones.leanAge,         color: isD ? '#F87171' : '#DC2626', label: 'Lean' },
+    { age: milestones.leanAge,         color: isD ? '#FB7185' : '#E11D48', label: 'Lean' },
     { age: milestones.coastAge,        color: isD ? '#60A5FA' : '#2563EB', label: 'Coast' },
     { age: milestones.baristaAge,      color: isD ? '#34D399' : '#059669', label: 'Barista' },
     { age: milestones.fullAge,         color: isD ? '#A78BFA' : '#7C3AED', label: 'Full' },
-    { age: inp.retirementAge,          color: isD ? '#D1D5DB' : '#9CA3AF', label: 'Retire' },
-    { age: inp.houseBuyAge > 0 && (inp.houseDeposit > 0 || inp.mortgageAmount > 0) ? inp.houseBuyAge : null, color: isD ? '#FBBF24' : '#D97706', label: '🏠 Buy' },
-    { age: milestones.mortgagePaidAge, color: isD ? '#FBBF24' : '#D97706', label: '🏠 Free' },
+    { age: inp.retirementAge,          color: isD ? '#64748B' : '#475569', label: 'Retire' },
+    { age: inp.houseBuyAge > 0 && (inp.houseDeposit > 0 || inp.mortgageAmount > 0) ? Math.max(firstAge, inp.houseBuyAge) : null, color: isD ? '#FBBF24' : '#D97706', label: 'Buy' },
+    { age: milestones.mortgagePaidAge, color: isD ? '#FBBF24' : '#D97706', label: 'Debt-free' },
   ].filter(l => l.age != null && l.age >= firstAge)
    .map(l => ({ idx: l.age - firstAge, color: l.color, label: l.label }));
 
@@ -1115,12 +1480,12 @@ function buildProjectionChart(data, milestones, targets, inp, mc) {
         msLines: { lines: msLines },
         legend: {
           position: 'bottom',
-          labels: { boxWidth: 12, padding: 10, font: { size: 11 }, filter: i => !i.text.startsWith('_') },
+          labels: { boxWidth: 11, padding: 12, usePointStyle: true, font: { size: 11 }, filter: i => !i.text.startsWith('_') },
         },
-        tooltip: {
+        tooltip: chartTooltipOpts({
           filter: item => !item.dataset.label.startsWith('_'),
           callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.parsed.y)}` },
-        },
+        }),
       },
       scales: {
         x: { title: { display: true, text: 'Age', font: { size: 11 } }, grid: { color: G } },
@@ -1138,23 +1503,23 @@ function buildTimelineChart(milestones, currentAge, partnerMilestones, partnerAg
   const ctx    = document.getElementById('chart-timeline').getContext('2d');
   const labels = ['Lean', 'Coast', 'Barista', 'Full'];
   const isD    = isDark();
-  const colors = isD ? ['#F87171', '#60A5FA', '#34D399', '#A78BFA'] : ['#DC2626', '#2563EB', '#059669', '#7C3AED'];
+  const colors = isD ? ['#FB7185', '#60A5FA', '#34D399', '#A78BFA'] : ['#E11D48', '#2563EB', '#059669', '#7C3AED'];
   const ages1  = [milestones.leanAge, milestones.coastAge, milestones.baristaAge, milestones.fullAge];
 
   const datasets = [{
-    label: 'You',
+    label: partnerMilestones ? 'Household (combined)' : 'You',
     data: ages1.map(a => a ?? null),
     backgroundColor: colors.map(c => c + 'CC'), borderColor: colors,
-    borderWidth: 2, borderRadius: 6,
+    borderWidth: 1.5, borderRadius: 6,
   }];
 
   if (partnerMilestones && partnerAge) {
     const ages2 = [partnerMilestones.leanAge, partnerMilestones.coastAge, partnerMilestones.baristaAge, partnerMilestones.fullAge];
     datasets.push({
-      label: 'Partner',
+      label: 'Partner (sequential)',
       data: ages2.map(a => a ?? null),
-      backgroundColor: colors.map(c => c + '55'), borderColor: colors,
-      borderWidth: 2, borderRadius: 6, borderDash: [4, 4],
+      backgroundColor: colors.map(c => c + '4D'), borderColor: colors,
+      borderWidth: 1.5, borderRadius: 6, borderDash: [4, 4],
     });
   }
 
@@ -1164,11 +1529,13 @@ function buildTimelineChart(milestones, currentAge, partnerMilestones, partnerAg
     options: {
       indexAxis: 'y', responsive: true, maintainAspectRatio: true,
       plugins: {
-        legend: { display: !!partnerMilestones, position: 'bottom', labels: { boxWidth: 12, padding: 10 } },
-        tooltip: { callbacks: {
-          label: c => c.parsed.x == null ? ` ${c.dataset.label}: not reached`
-            : ` ${c.dataset.label}: age ${c.parsed.x} (${Math.round(c.parsed.x - (c.datasetIndex === 0 ? currentAge : partnerAge))} yrs away)`,
-        }},
+        legend: { display: !!partnerMilestones, position: 'bottom', labels: { boxWidth: 11, padding: 12, usePointStyle: true } },
+        tooltip: chartTooltipOpts({
+          callbacks: {
+            label: c => c.parsed.x == null ? ` ${c.dataset.label}: not reached`
+              : ` ${c.dataset.label}: age ${c.parsed.x} (${Math.round(c.parsed.x - (c.datasetIndex === 0 ? currentAge : partnerAge))} yrs away)`,
+          },
+        }),
       },
       scales: {
         x: { title: { display: true, text: 'Age', font: { size: 11 } }, min: Math.min(currentAge, partnerAge || currentAge), max: 90, grid: { color: gc() } },
@@ -1193,48 +1560,49 @@ function buildIncomeChart(inp, result) {
     ? `Household expenses in your first year of retirement (your age ${inp.retirementAge}), today's dollars — partner may still be working`
     : `First year of your retirement (age ${inp.retirementAge}), today's dollars (Age Pension starts at 67)`;
 
-  const raw    = [fromPort, partnerY, pensionY];
-  const labels = ['Household Portfolio Drawdown', 'Partner Salary (still working)', 'Age Pension'];
-  const isD    = isDark();
-  const colors = isD ? ['#A78BFA', '#60A5FA', '#FBBF24'] : ['#7C3AED', '#2563EB', '#F59E0B'];
-  const vals   = raw.map((v, i) => ({ v, l: labels[i], c: colors[i] })).filter(x => x.v > 0);
+  const raw      = [fromPort, partnerY, pensionY];
+  const labels   = ['Household Portfolio Drawdown', 'Partner Salary (still working)', 'Age Pension'];
+  const totalSrc = Math.max(1, fromPort + partnerY + pensionY);
+  const isD      = isDark();
+  const colors   = isD ? ['#A78BFA', '#60A5FA', '#FBBF24'] : ['#7C3AED', '#2563EB', '#D97706'];
+  const vals     = raw.map((v, i) => ({ v, l: labels[i], c: colors[i] })).filter(x => x.v > 0);
 
   if (charts.income) charts.income.destroy();
   charts.income = new Chart(ctx, {
     type: 'doughnut',
-    data: { labels: vals.map(x => x.l), datasets: [{ data: vals.map(x => x.v), backgroundColor: vals.map(x => x.c + 'CC'), borderColor: vals.map(x => x.c), borderWidth: 2, hoverOffset: 6 }] },
+    data: { labels: vals.map(x => x.l), datasets: [{ data: vals.map(x => x.v), backgroundColor: vals.map(x => x.c + 'D9'), borderColor: isD ? '#101726' : '#FFFFFF', borderWidth: 2, hoverOffset: 6 }] },
     options: {
-      responsive: true, maintainAspectRatio: true,
+      responsive: true, maintainAspectRatio: true, cutout: '68%',
       plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } },
-        tooltip: { callbacks: { label: c => ` ${c.label}: ${fmt(c.parsed)} (${(c.parsed / Math.max(1, expReal) * 100).toFixed(0)}%)` } },
+        legend: { position: 'bottom', labels: { boxWidth: 11, padding: 12, usePointStyle: true } },
+        tooltip: chartTooltipOpts({ callbacks: { label: c => ` ${c.label}: ${fmt(c.parsed)} (${(c.parsed / totalSrc * 100).toFixed(0)}%)` } }),
       },
     },
   });
 }
 
-function buildTaxChart(p1Tax, p1Salary, p1SG) {
+function buildTaxChart(p1Tax, p1Salary, p1SG, p1Sac = 0) {
   const ctx     = document.getElementById('chart-tax').getContext('2d');
   const takePay = p1Tax.p1Net  ?? p1Tax.net  ?? 0;
   const rawTax  = p1Tax.p1Raw  ?? p1Tax.raw  ?? 0;
   const hecs    = p1Tax.p1Hecs ?? p1Tax.hecs ?? 0;
   const superY  = p1SG;
 
-  const raw    = [takePay, rawTax, hecs, superY];
-  const labels = ['Take-Home', 'Tax + Medicare', 'HECS/HELP', 'Employer Super'];
+  const raw    = [takePay, rawTax, hecs, p1Sac, superY];
+  const labels = ['Take-Home', 'Tax + Medicare', 'HECS/HELP', 'Salary Sacrifice', 'Employer Super'];
   const isD    = isDark();
-  const colors = isD ? ['#34D399', '#F87171', '#FCD34D', '#FBBF24'] : ['#059669', '#DC2626', '#F59E0B', '#B45309'];
+  const colors = isD ? ['#34D399', '#FB7185', '#FCD34D', '#60A5FA', '#FBBF24'] : ['#059669', '#E11D48', '#F59E0B', '#2563EB', '#D97706'];
   const vals   = raw.map((v, i) => ({ v, l: labels[i], c: colors[i] })).filter(x => x.v > 0);
 
   if (charts.tax) charts.tax.destroy();
   charts.tax = new Chart(ctx, {
     type: 'doughnut',
-    data: { labels: vals.map(x => x.l), datasets: [{ data: vals.map(x => x.v), backgroundColor: vals.map(x => x.c + 'CC'), borderColor: vals.map(x => x.c), borderWidth: 2, hoverOffset: 6 }] },
+    data: { labels: vals.map(x => x.l), datasets: [{ data: vals.map(x => x.v), backgroundColor: vals.map(x => x.c + 'D9'), borderColor: isD ? '#101726' : '#FFFFFF', borderWidth: 2, hoverOffset: 6 }] },
     options: {
-      responsive: true, maintainAspectRatio: true,
+      responsive: true, maintainAspectRatio: true, cutout: '68%',
       plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } },
-        tooltip: { callbacks: { label: c => ` ${c.label}: ${fmt(c.parsed)} (${(c.parsed / (p1Salary + superY) * 100).toFixed(1)}%)` } },
+        legend: { position: 'bottom', labels: { boxWidth: 11, padding: 12, usePointStyle: true } },
+        tooltip: chartTooltipOpts({ callbacks: { label: c => ` ${c.label}: ${fmt(c.parsed)} (${(c.parsed / Math.max(1, p1Salary + superY) * 100).toFixed(1)}%)` } }),
       },
     },
   });
@@ -1261,14 +1629,17 @@ function buildSavingsChart(data, retirementAge, partnerRetirementAge, inp) {
     data: {
       labels: working.map(r => r.age),
       datasets: [
-        { label: 'Super Contributions (net)', data: working.map(r => r.netSuperContrib), backgroundColor: isD ? 'rgba(251,191,36,0.7)' : 'rgba(180,83,9,0.7)',  borderColor: isD ? '#FBBF24' : '#B45309', borderWidth: 1, borderRadius: 2 },
-        { label: 'Investment Savings',         data: working.map(r => r.annualSavings),   backgroundColor: isD ? 'rgba(96,165,250,0.7)' : 'rgba(37,99,235,0.7)', borderColor: isD ? '#60A5FA' : '#2563EB', borderWidth: 1, borderRadius: 2 },
+        { label: 'Super Contributions (net)', data: working.map(r => r.netSuperContrib), backgroundColor: isD ? 'rgba(251,191,36,0.75)' : 'rgba(217,119,6,0.75)',  borderColor: isD ? '#FBBF24' : '#D97706', borderWidth: 1, borderRadius: 4 },
+        { label: 'Investment Savings',         data: working.map(r => r.annualSavings),   backgroundColor: isD ? 'rgba(96,165,250,0.75)' : 'rgba(37,99,235,0.75)', borderColor: isD ? '#60A5FA' : '#2563EB', borderWidth: 1, borderRadius: 4 },
       ],
     },
     options: {
       responsive: true, maintainAspectRatio: true,
       interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, padding: 10 } }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.parsed.y)}` } } },
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 11, padding: 12, usePointStyle: true } },
+        tooltip: chartTooltipOpts({ callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.parsed.y)}` } }),
+      },
       scales: {
         x: { stacked: true, title: { display: true, text: 'Age', font: { size: 11 } }, grid: { display: false } },
         y: { stacked: true, grid: { color: G }, ticks: { callback: v => '$' + (v / 1000).toFixed(0) + 'K' } },
@@ -1312,6 +1683,9 @@ function renderHero(inp, result, mc, warnings) {
   const helpChip = result.helpPaidOffAge != null && inp.hecsActive
     ? `<span class="chip">Your HECS paid off at <b>${result.helpPaidOffAge}</b></span>` : '';
 
+  const partnerHelpChip = result.partnerHelpPaidOffAge != null && inp.couple && inp.partnerHecsActive
+    ? `<span class="chip">Partner HECS paid off at <b>${result.partnerHelpPaidOffAge}</b></span>` : '';
+
   const mortgageChip = m.mortgagePaidAge != null
     ? `<span class="chip">🏠 Mortgage-free at <b>${m.mortgagePaidAge}</b></span>` : '';
 
@@ -1320,7 +1694,7 @@ function renderHero(inp, result, mc, warnings) {
     <div class="hero-headline">${head}${m.fullAge != null && inp.couple ? ageNote : ''}</div>
     <div class="hero-chips">
       ${chip('Lean', m.leanAge)}${chip('Coast', m.coastAge)}${chip('Barista', m.baristaAge)}
-      ${helpChip}${mortgageChip}${mcChip}
+      ${helpChip}${partnerHelpChip}${mortgageChip}${mcChip}
     </div>
     ${warnings.length ? `<div class="hero-warnings">${warnings.map(w => `<div class="warn">⚠ ${w}</div>`).join('')}</div>` : ''}
   `;
@@ -1333,7 +1707,8 @@ function buildWarnings(inp, result) {
 
   const r0 = result.rows[0];
   if (r0 && !r0.retired) {
-    const gap = inp.currentExpenses + Math.min(inp.extraNonConcessional, NON_CONCESSIONAL_CAP) - (r0.annualTax.net ?? 0);
+    const gap = inp.currentExpenses + (r0.houseExpAdj ?? 0) + Math.min(inp.extraNonConcessional, NON_CONCESSIONAL_CAP)
+      - (r0.annualTax.net ?? 0) - (r0.pension ?? 0);
     if (gap > 1)
       warnings.push(`Spending exceeds take-home pay by ${fmt(gap)}/yr — the shortfall is drawn from savings.`);
   }
@@ -1344,7 +1719,7 @@ function buildWarnings(inp, result) {
   // House purchase warnings
   if (inp.houseDeposit > 0 || inp.mortgageAmount > 0) {
     if (inp.houseBuyAge <= inp.currentAge)
-      warnings.push('House buy age is at or before your current age — the purchase is treated as already done (deposit drawn immediately).');
+      warnings.push(`House buy age is at or before your current age — deposit and mortgage start immediately at age ${inp.currentAge}.`);
     const repay = annualMortgageRepayment(inp.mortgageAmount, inp.mortgageRate, inp.mortgageTerm);
     if (repay > 0 && repay > inp.rentSaving)
       warnings.push(`Mortgage repayments (${fmt(repay)}/yr) exceed your rent saving (${fmt(inp.rentSaving)}/yr) — expenses increase by ${fmt(repay - inp.rentSaving)}/yr during the mortgage.`);
@@ -1399,46 +1774,50 @@ function renderCard(prefix, age, currentAge, fiNum, descLines, progressPct) {
 //  JOINT RETIREMENT ANALYSIS
 // ══════════════════════════════════════════════════════════
 
-function renderJointSummary(inp, p1Milestones, p2Milestones) {
+function renderJointSummary(inp, p1SeqMilestones, p2SeqMilestones, householdMilestones) {
   const el = document.getElementById('joint-summary');
   if (!el) return;
 
-  const p1Full = p1Milestones.fullAge;
-  const p2Full = p2Milestones.fullAge;
+  const p1Full = p1SeqMilestones?.fullAge ?? null;
+  const p2Full = p2SeqMilestones?.fullAge ?? null;
+  const hhFull = householdMilestones?.fullAge ?? null;
 
-  if (!p1Full && !p2Full) {
+  if (!p1Full && !p2Full && !hhFull) {
     el.innerHTML = `<p class="joint-none">Neither reaches Full FIRE by age 90 with current assumptions.</p>`;
     return;
   }
 
   const p1YearsToFull = p1Full != null ? p1Full - inp.currentAge : null;
-  const p2YearsToFull = p2Full != null ? p2Full - inp.partnerAge  : null;
+  const p2YearsToFull = p2Full != null ? p2Full - inp.partnerAge : null;
+  const hhYearsToFull = hhFull != null ? hhFull - inp.currentAge : null;
 
   const currentYear = new Date().getFullYear();
   const p1CalYear = p1YearsToFull != null ? currentYear + p1YearsToFull : null;
   const p2CalYear = p2YearsToFull != null ? currentYear + p2YearsToFull : null;
+  const hhCalYear = hhYearsToFull != null ? currentYear + hhYearsToFull : null;
 
-  let firstLabel, firstYear, firstAge, secondLabel, secondYear, gapYears;
+  let firstLabel, firstYear, firstAge, secondLabel, gapYears;
   if (p1CalYear != null && (p2CalYear == null || p1CalYear <= p2CalYear)) {
     firstLabel = 'You'; firstYear = p1CalYear; firstAge = p1Full;
-    secondLabel = 'Partner'; secondYear = p2CalYear; gapYears = p2CalYear != null ? p2CalYear - p1CalYear : null;
+    secondLabel = 'Partner'; gapYears = p2CalYear != null ? p2CalYear - p1CalYear : null;
   } else {
     firstLabel = 'Partner'; firstYear = p2CalYear; firstAge = p2Full;
-    secondLabel = 'You'; secondYear = p1CalYear; gapYears = p1CalYear != null ? p1CalYear - p2CalYear : null;
+    secondLabel = 'You'; gapYears = p1CalYear != null ? p1CalYear - p2CalYear : null;
   }
 
-  const jointYear  = p1CalYear != null && p2CalYear != null ? Math.max(p1CalYear, p2CalYear) : (p1CalYear ?? p2CalYear);
-  const jointYears = jointYear != null ? jointYear - currentYear : null;
-
   // Sequential advantage: while one partner works, the household only needs the gap funded
-  const p1Sac = Math.min(inp.extraConcessional, Math.max(0, CONCESSIONAL_CAP - inp.grossSalary * inp.sgRate));
-  const p2Sac = Math.min(inp.partnerExtraConcessional, Math.max(0, CONCESSIONAL_CAP - inp.partnerSalary * inp.sgRate));
-  const p1NetNow = calcTax(inp.grossSalary, p1Sac, inp.hecsActive, taxOpts(inp)).net;
-  const p2NetNow = calcTax(inp.partnerSalary, p2Sac, inp.partnerHecsActive, taxOpts(inp)).net;
+  const p1SG = Math.min(inp.grossSalary, MAX_SG_BASE) * inp.sgRate;
+  const p2SG = Math.min(inp.partnerSalary, MAX_SG_BASE) * inp.sgRate;
+  const p1EligCF = inp.superBalance < CARRY_FWD_TSB_LIMIT ? inp.carryForwardCap : 0;
+  const p2EligCF = inp.partnerSuperBalance < CARRY_FWD_TSB_LIMIT ? inp.partnerCarryForwardCap : 0;
+  const p1Sac = Math.max(0, Math.min(inp.extraConcessional, inp.grossSalary, Math.max(0, CONCESSIONAL_CAP - p1SG) + p1EligCF));
+  const p2Sac = Math.max(0, Math.min(inp.partnerExtraConcessional, inp.partnerSalary, Math.max(0, CONCESSIONAL_CAP - p2SG) + p2EligCF));
+  const p1TaxNow = calcTax(inp.grossSalary, p1Sac, inp.hecsActive, taxOpts(inp));
+  const p2TaxNow = calcTax(inp.partnerSalary, p2Sac, inp.partnerHecsActive, taxOpts(inp));
+  const p1NetNow = p1TaxNow.net + (p1TaxNow.hecs - Math.min(p1TaxNow.hecs, inp.hecsActive ? inp.hecsBalance : 0));
+  const p2NetNow = p2TaxNow.net + (p2TaxNow.hecs - Math.min(p2TaxNow.hecs, inp.partnerHecsActive ? inp.partnerHecsBalance : 0));
 
-  // Use effective retirement-phase expenses for FI comparisons in the strategy note
   const effFullRet = houseExpAdjAt(inp, inp.retirementAge);
-
   const seqFI_partnerRetires = Math.max(0, effFullRet - p1NetNow) / inp.swr;
   const seqFI_primaryRetires = Math.max(0, effFullRet - p2NetNow) / inp.swr;
   const householdFI = effFullRet / inp.swr;
@@ -1459,10 +1838,10 @@ function renderJointSummary(inp, p1Milestones, p2Milestones) {
       const seqFI      = firstLabel === 'You' ? seqFI_primaryRetires : seqFI_partnerRetires;
       const fullFI     = fmtK(householdFI);
       const seqFIStr   = fmtK(seqFI);
-      const pctReduced = (seqFI / householdFI * 100).toFixed(0);
+      const pctReduced = (seqFI / Math.max(1, householdFI) * 100).toFixed(0);
       return `<div class="joint-strategy">
         <span class="js-icon">💡</span>
-        <div><strong>Sequential advantage:</strong> When ${whoRetires} retires first, ${whoWorks} keeps working and covers ${fmt(firstLabel === 'You' ? p2NetNow : p1NetNow)}/yr in expenses. ${whoRetires} only needs <strong>${seqFIStr}</strong> (${pctReduced}% of the ${fullFI} full FI number) — a meaningfully lower bar. This could bring ${whoRetires}'s retirement <em>earlier</em> than shown above.</div>
+        <div><strong>Sequential advantage:</strong> When ${whoRetires} retires first, ${whoWorks} keeps working and covers ${fmt(firstLabel === 'You' ? p2NetNow : p1NetNow)}/yr in expenses. ${whoRetires} only needs <strong>${seqFIStr}</strong> (${pctReduced}% of the ${fullFI} full FI number) — a meaningfully lower bar.</div>
       </div>`;
     }
     return '';
@@ -1471,31 +1850,31 @@ function renderJointSummary(inp, p1Milestones, p2Milestones) {
   el.innerHTML = `
     <div class="joint-comparison">
       <div class="joint-person-box">
-        <div class="jp-who">You</div>
+        <div class="jp-who">You (sequential)</div>
         <div class="jp-big-age" style="color:var(--full)">${p1Full ?? '90+'}</div>
-        <div class="jp-small">Full FIRE age</div>
+        <div class="jp-small">Sequential FIRE age</div>
         <div class="jp-cal">${p1CalYear != null ? `${p1CalYear} · ${p1YearsToFull} yrs` : 'Not reached'}</div>
       </div>
       <div class="joint-divider-v"></div>
       <div class="joint-person-box">
-        <div class="jp-who">Partner</div>
+        <div class="jp-who">Partner (sequential)</div>
         <div class="jp-big-age" style="color:var(--coast)">${p2Full ?? '90+'}</div>
-        <div class="jp-small">Full FIRE age</div>
+        <div class="jp-small">Sequential FIRE age</div>
         <div class="jp-cal">${p2CalYear != null ? `${p2CalYear} · ${p2YearsToFull} yrs` : 'Not reached'}</div>
       </div>
     </div>
     <div class="joint-outcome">
       <div class="jo-row">
-        <span class="jo-label">First retirement</span>
-        <span class="jo-val">${firstLabel} — ${firstYear ? `${firstYear} (age ${firstAge})` : 'not reached'}</span>
+        <span class="jo-label">First sequential retirement</span>
+        <span class="jo-val">${firstYear ? `${firstLabel} — ${firstYear} (age ${firstAge})` : 'Not reached'}</span>
       </div>
       ${gapYears != null && gapYears > 0 ? `<div class="jo-row">
-        <span class="jo-label">Retirement gap</span>
-        <span class="jo-val">${gapYears} year${gapYears !== 1 ? 's' : ''} between retirements</span>
+        <span class="jo-label">Sequential retirement gap</span>
+        <span class="jo-val">${gapYears} year${gapYears !== 1 ? 's' : ''} between sequential milestones</span>
       </div>` : ''}
       <div class="jo-row highlight">
-        <span class="jo-label">Both fully retired</span>
-        <span class="jo-val">${jointYear ? `${jointYear} · ${jointYears} years from now` : 'Not reached by 90'}</span>
+        <span class="jo-label">Both retired (combined wealth)</span>
+        <span class="jo-val">${hhCalYear ? `${hhCalYear} · your age ${hhFull} (${hhYearsToFull} yrs)` : 'Not reached by 90'}</span>
       </div>
     </div>
     ${strategyNote()}
@@ -1533,8 +1912,8 @@ function renderWhatIf(inp, result) {
 
 window.runWhatIf = function() {
   const inp = _lastInp;
-  if (!inp) return;
-  const baseRes = project(inp);
+  const baseRes = _lastResult;
+  if (!inp || !baseRes) return;
   const baseW90 = baseRes.totalsReal[baseRes.totalsReal.length - 1] || 0;
 
   const youEl = document.getElementById('wi-you-retire');
@@ -1568,6 +1947,14 @@ window.runWhatIf = function() {
     ageDeltaStr = `<span class="wb-delta-bad">No longer reached</span>`;
   }
 
+  const depleteNote = testRes.failed
+    ? `<div class="whatif-box" style="border-color:var(--lean-border)">
+        <div class="wb-label">Portfolio Survival</div>
+        <div class="wb-val wb-delta-bad">Runs dry at ${testRes.depleteAge}</div>
+        <div class="wb-sub">insufficient funds to age 90</div>
+      </div>`
+    : '';
+
   document.getElementById('wi-global-result').innerHTML = `
     <div class="whatif-box">
       <div class="wb-label">Wealth at Age 90</div>
@@ -1579,6 +1966,7 @@ window.runWhatIf = function() {
       <div class="wb-val">${ageStr}</div>
       <div class="wb-sub">${ageDeltaStr || 'Target reached'}</div>
     </div>
+    ${depleteNote}
   `;
 };
 
@@ -1588,7 +1976,7 @@ function renderOptimisations(inp, result) {
   const opts = [];
 
   const baseW90 = result.totalsReal[result.totalsReal.length - 1] || 0;
-  const baseTax = (result.rows[0]?.annualTax.total || 0) + (result.rows[0]?.invTax || 0);
+  const baseAllTax = (result.rows[0]?.annualTax.total || 0) + (result.rows[0]?.invTax || 0) + (result.rows[0]?.superTax || 0);
   const baseFull = result.milestones.fullAge;
 
   const addOpt = (icon, title, desc, gain, cls = 'ready', valCls = 'sc-green') => {
@@ -1620,17 +2008,37 @@ function renderOptimisations(inp, result) {
     addOpt('⏳', 'Work One More Year', 'Delay retirement by 1 year to significantly improve portfolio survival.', `Delays shortfall`);
   }
 
-  // 2. Max Concessional Super
-  const p1SG = inp.grossSalary * inp.sgRate;
-  const p1CapRoom = Math.max(0, CONCESSIONAL_CAP - p1SG - inp.extraConcessional);
+  // 2. Max Concessional Super (Primary) — accounts for MSCB, TSB < $500k carry-forward, 15% super tax & bridge survival
+  const p1SG = Math.min(inp.grossSalary, MAX_SG_BASE) * inp.sgRate;
+  const p1EligCF = inp.superBalance < CARRY_FWD_TSB_LIMIT ? inp.carryForwardCap : 0;
+  const p1MaxSac = Math.max(0, Math.min(inp.grossSalary, CONCESSIONAL_CAP - p1SG + p1EligCF));
+  const p1CapRoom = Math.max(0, p1MaxSac - inp.extraConcessional);
   if (p1CapRoom > 1000 && inp.grossSalary > 45000) {
     const maxConcInp = { ...inp, extraConcessional: inp.extraConcessional + p1CapRoom };
     const maxConcRes = project(maxConcInp);
     const mcW90 = maxConcRes.totalsReal[maxConcRes.totalsReal.length - 1] || 0;
-    const mcTax = (maxConcRes.rows[0]?.annualTax.total || 0) + (maxConcRes.rows[0]?.invTax || 0);
-    const taxSaved = baseTax - mcTax;
-    if (taxSaved > 0 && mcW90 > baseW90) {
-      addOpt('📈', 'Max Salary Sacrifice', `Add ${fmt(p1CapRoom)}/yr to pre-tax super to hit the $30k concessional cap.`, `Save ${fmt(taxSaved)} tax this yr`);
+    const mcAllTax = (maxConcRes.rows[0]?.annualTax.total || 0) + (maxConcRes.rows[0]?.invTax || 0) + (maxConcRes.rows[0]?.superTax || 0);
+    const netTaxSaved = baseAllTax - mcAllTax;
+    if (netTaxSaved > 0 && mcW90 > baseW90 && (!maxConcRes.failed || result.failed)) {
+      addOpt('📈', 'Max Salary Sacrifice', `Add ${fmt(p1CapRoom)}/yr to pre-tax super to use remaining concessional cap.`, `Save ${fmt(netTaxSaved)} net tax/yr`);
+    }
+  }
+
+  // 2b. Partner Max Concessional Super (Couple mode)
+  if (inp.couple && inp.partnerSalary > 45000) {
+    const p2SG = Math.min(inp.partnerSalary, MAX_SG_BASE) * inp.sgRate;
+    const p2EligCF = inp.partnerSuperBalance < CARRY_FWD_TSB_LIMIT ? inp.partnerCarryForwardCap : 0;
+    const p2MaxSac = Math.max(0, Math.min(inp.partnerSalary, CONCESSIONAL_CAP - p2SG + p2EligCF));
+    const p2CapRoom = Math.max(0, p2MaxSac - inp.partnerExtraConcessional);
+    if (p2CapRoom > 1000) {
+      const pMaxInp = { ...inp, partnerExtraConcessional: inp.partnerExtraConcessional + p2CapRoom };
+      const pMaxRes = project(pMaxInp);
+      const pmcW90 = pMaxRes.totalsReal[pMaxRes.totalsReal.length - 1] || 0;
+      const pmcAllTax = (pMaxRes.rows[0]?.annualTax.total || 0) + (pMaxRes.rows[0]?.invTax || 0) + (pMaxRes.rows[0]?.superTax || 0);
+      const netTaxSaved = baseAllTax - pmcAllTax;
+      if (netTaxSaved > 0 && pmcW90 > baseW90 && (!pMaxRes.failed || result.failed)) {
+        addOpt('📈', 'Max Partner Salary Sacrifice', `Partner can add ${fmt(p2CapRoom)}/yr to pre-tax super within the concessional cap.`, `Save ${fmt(netTaxSaved)} net tax/yr`);
+      }
     }
   }
 
@@ -1638,8 +2046,8 @@ function renderOptimisations(inp, result) {
   if (inp.couple && inp.investHolder !== 'lower' && (inp.investBalance > 0 || inp.cashBalance > 0 || inp.partnerInvestBalance > 0)) {
     const lowerInp = { ...inp, investHolder: 'lower' };
     const lowerRes = project(lowerInp);
-    const lTax = (lowerRes.rows[0]?.annualTax.total || 0) + (lowerRes.rows[0]?.invTax || 0);
-    const taxSaved = baseTax - lTax;
+    const lTax = (lowerRes.rows[0]?.annualTax.total || 0) + (lowerRes.rows[0]?.invTax || 0) + (lowerRes.rows[0]?.superTax || 0);
+    const taxSaved = baseAllTax - lTax;
     if (taxSaved > 0) {
       addOpt('⚖️', 'Tax-Smart Investments', 'Switch taxable investments to the lower earner\'s name to reduce ongoing tax drag.', `Save ${fmt(taxSaved)} tax this yr`);
     }
@@ -1650,11 +2058,13 @@ function renderOptimisations(inp, result) {
     const saferInp = { ...inp, swr: 0.035 };
     const saferRes = project(saferInp);
     const saferAge = saferRes.milestones.fullAge;
-    if (saferAge) {
-      const diff = saferAge - (baseFull || saferAge);
-      const impactStr = diff > 0 ? `Retire ${diff} yr${diff !== 1 ? 's' : ''} later` : 'No delay in FIRE age';
-      addOpt('🛡️', 'Conservative 3.5% SWR', `Lower withdrawal rate to 3.5% for more safety against sequence of returns risk.`, impactStr, 'gap', 'sc-red');
-    }
+    const impactStr = saferAge == null
+      ? 'Not reached by 90'
+      : (() => {
+          const diff = saferAge - (baseFull || saferAge);
+          return diff > 0 ? `Retire ${diff} yr${diff !== 1 ? 's' : ''} later` : 'No delay in FIRE age';
+        })();
+    addOpt('🛡️', 'Conservative 3.5% SWR', `Lower withdrawal rate to 3.5% for more safety against sequence of returns risk.`, impactStr, 'gap', 'sc-red');
   }
 
   if (opts.length === 0) {
@@ -1668,21 +2078,90 @@ function renderOptimisations(inp, result) {
 //  SCENARIO ANALYSIS
 // ══════════════════════════════════════════════════════════
 
-function renderScenarios(inp, p1Res, p2Res) {
+function renderScenarios(inp, p1Res, p2Res, baseRes) {
   const el = document.getElementById('scenario-grid');
   const introEl = document.getElementById('scenario-intro');
   if (!el) return;
-  if (!p1Res || !p2Res) {
-    el.innerHTML = '';
+
+  const scCard2 = (icon, title, sub, isReady, badgeLabel, rows, footer) => `
+    <div class="sc-card ${isReady ? 'ready' : 'gap'}">
+      <div class="sc-head">
+        <div class="sc-icon">${icon}</div>
+        <div class="sc-titlewrap">
+          <div class="sc-title">${title}</div>
+          <div class="sc-sub">${sub}</div>
+        </div>
+        <div class="sc-badge sc-badge-${isReady ? 'ready' : 'gap'}">${badgeLabel}</div>
+      </div>
+      <div class="sc-body">
+        ${rows.map(([l, v, cls]) =>
+          `<div class="sc-row${cls ? ' ' + cls : ''}"><span>${l}</span><span>${v}</span></div>`
+        ).join('')}
+      </div>
+      ${footer ? `<div class="sc-foot">${footer}</div>` : ''}
+    </div>`;
+
+  // Single-person alternate scenarios
+  if (!inp.couple || !p1Res || !p2Res) {
     if (introEl) introEl.textContent = 'Simulate different decisions (like retiring immediately or coasting) to see if the portfolio survives to age 90.';
+    const baseW90 = baseRes?.totalsReal?.[baseRes.totalsReal.length - 1] ?? 0;
+    const p1NetNoSac = calcTax(inp.grossSalary, 0, inp.hecsActive, taxOpts(inp)).net;
+    const scenarios = [
+      {
+        icon: '🏖️', title: 'Retire immediately', sub: `Stop work now at age ${inp.currentAge}`,
+        run: project({ ...inp, retirementAge: inp.currentAge }),
+      },
+      {
+        icon: '⛵', title: 'Coast from today', sub: `Zero voluntary savings/sacrifice to age ${inp.retirementAge}`,
+        run: project({
+          ...inp, extraConcessional: 0, extraNonConcessional: 0,
+          currentExpenses: Math.max(inp.currentExpenses, p1NetNoSac),
+        }),
+      },
+      {
+        icon: '⏩', title: 'Retire 5 years earlier', sub: `Target age ${Math.max(inp.currentAge + 1, inp.retirementAge - 5)} instead of ${inp.retirementAge}`,
+        run: project({ ...inp, retirementAge: Math.max(inp.currentAge + 1, inp.retirementAge - 5) }),
+      },
+      {
+        icon: '📈', title: '+10% retirement spending', sub: `Stress-test ${fmt(inp.fullExpenses * 1.1)}/yr retirement budget`,
+        run: project({
+          ...inp,
+          leanExpenses: inp.leanExpenses * 1.1,
+          baristaExpenses: inp.baristaExpenses * 1.1,
+          fullExpenses: inp.fullExpenses * 1.1,
+        }),
+      },
+    ];
+    el.innerHTML = scenarios.map(sc => {
+      const w90 = sc.run.totalsReal[sc.run.totalsReal.length - 1] ?? 0;
+      const delta = w90 - baseW90;
+      const ok = !sc.run.failed;
+      const badgeLbl = ok ? '✓ Survives to 90' : `⚠ Dry at ${sc.run.depleteAge}`;
+      const rows = [
+        ['Wealth at age 90', fmtK(w90), ok ? 'sc-green' : 'sc-red'],
+        ['vs base plan at 90', (delta >= 0 ? '+' : '') + fmtK(delta), delta >= 0 ? 'sc-green' : 'sc-red'],
+        ['Full FIRE age', sc.run.milestones.fullAge ?? '90+', ''],
+      ];
+      const foot = ok
+        ? `Plan remains funded through age 90 with ${fmtK(w90)} remaining.`
+        : `Portfolio depletes at age ${sc.run.depleteAge} under these assumptions.`;
+      return scCard2(sc.icon, sc.title, sc.sub, ok, badgeLbl, rows, foot);
+    }).join('');
     return;
   }
+
   if (introEl) introEl.textContent = 'Each card shows one sequential retirement scenario: one partner retires while the other keeps working, so only the retiring partner needs to fund the household expense gap (not the full FI number).';
 
-  const p1Sac = Math.min(inp.extraConcessional, Math.max(0, CONCESSIONAL_CAP - inp.grossSalary * inp.sgRate));
-  const p2Sac = Math.min(inp.partnerExtraConcessional, Math.max(0, CONCESSIONAL_CAP - inp.partnerSalary * inp.sgRate));
-  const p1Net = calcTax(inp.grossSalary, p1Sac, inp.hecsActive, taxOpts(inp)).net;
-  const p2Net = calcTax(inp.partnerSalary, p2Sac, inp.partnerHecsActive, taxOpts(inp)).net;
+  const p1SG = Math.min(inp.grossSalary, MAX_SG_BASE) * inp.sgRate;
+  const p2SG = Math.min(inp.partnerSalary, MAX_SG_BASE) * inp.sgRate;
+  const p1EligCF = inp.superBalance < CARRY_FWD_TSB_LIMIT ? inp.carryForwardCap : 0;
+  const p2EligCF = inp.partnerSuperBalance < CARRY_FWD_TSB_LIMIT ? inp.partnerCarryForwardCap : 0;
+  const p1Sac = Math.max(0, Math.min(inp.extraConcessional, inp.grossSalary, Math.max(0, CONCESSIONAL_CAP - p1SG) + p1EligCF));
+  const p2Sac = Math.max(0, Math.min(inp.partnerExtraConcessional, inp.partnerSalary, Math.max(0, CONCESSIONAL_CAP - p2SG) + p2EligCF));
+  const p1TaxNow = calcTax(inp.grossSalary, p1Sac, inp.hecsActive, taxOpts(inp));
+  const p2TaxNow = calcTax(inp.partnerSalary, p2Sac, inp.partnerHecsActive, taxOpts(inp));
+  const p1Net = p1TaxNow.net + (p1TaxNow.hecs - Math.min(p1TaxNow.hecs, inp.hecsActive ? inp.hecsBalance : 0));
+  const p2Net = p2TaxNow.net + (p2TaxNow.hecs - Math.min(p2TaxNow.hecs, inp.partnerHecsActive ? inp.partnerHecsBalance : 0));
 
   // Effective full expenses at each relevant age (houseBuyAge is on primary's age axis)
   const p2RetireInPrimaryAge = inp.currentAge + (inp.partnerRetirementAge - inp.partnerAge);
@@ -1690,14 +2169,11 @@ function renderScenarios(inp, p1Res, p2Res) {
   const effExpP1Retire = houseExpAdjAt(inp, inp.retirementAge);   // SC3: your retirement age
   const effExpP2Retire = houseExpAdjAt(inp, p2RetireInPrimaryAge);// SC4: partner retirement (primary's age)
 
-  // Sequential FI: portfolio needed by the retiring person while the other keeps working
-  // SC1: partner retires now — expenses are today's; SC3/SC4: expenses at target retirement age
   const seqIfPartnerRetiresNow    = Math.max(0, effExpNow      - p1Net) / inp.swr;
   const seqIfYouRetireNow         = Math.max(0, effExpNow      - p2Net) / inp.swr;
   const seqIfYouRetireAtTarget    = Math.max(0, effExpP1Retire - p2Net) / inp.swr;
   const seqIfPartnerRetiresTarget = Math.max(0, effExpP2Retire - p1Net) / inp.swr;
 
-  // SC1/SC2 use "now" figures; SC3/SC4 use target-age figures
   const seqIfPartnerRetires = seqIfPartnerRetiresNow;
   const seqIfYouRetire      = seqIfYouRetireNow;
 
@@ -1733,30 +2209,12 @@ function renderScenarios(inp, p1Res, p2Res) {
   const partnerRetireInCY = CY + (inp.partnerRetirementAge - inp.partnerAge);
   const overlapYrs        = partnerRetireInCY - youRetireInCY;
 
-  const badge  = (have, need) => (need <= 0 || have >= need) ? 'ready' : 'gap';
-  const blabel = (have, need) => {
+  const isReady = (have, need) => (need <= 0 || have >= need);
+  const blabel  = (have, need) => {
     if (need <= 0) return '✓ Ready now';
     if (have >= need) return '✓ On track';
     return Math.round(have / need * 100) + '% funded';
   };
-
-  const scCard2 = (icon, title, sub, have, need, rows, footer) => `
-    <div class="sc-card ${badge(have, need)}">
-      <div class="sc-head">
-        <div class="sc-icon">${icon}</div>
-        <div class="sc-titlewrap">
-          <div class="sc-title">${title}</div>
-          <div class="sc-sub">${sub}</div>
-        </div>
-        <div class="sc-badge sc-badge-${badge(have, need)}">${blabel(have, need)}</div>
-      </div>
-      <div class="sc-body">
-        ${rows.map(([l, v, cls]) =>
-          `<div class="sc-row${cls ? ' ' + cls : ''}"><span>${l}</span><span>${v}</span></div>`
-        ).join('')}
-      </div>
-      ${footer ? `<div class="sc-foot">${footer}</div>` : ''}
-    </div>`;
 
   // ── SC1: Partner retires NOW, you keep working ──
   const sc1Gap = Math.max(0, effExpNow - p1Net);
@@ -1833,10 +2291,10 @@ function renderScenarios(inp, p1Res, p2Res) {
     : `Partner ${fmtK(sc4Need - p2WealthAtTarget)} short at age ${inp.partnerRetirementAge}. ${inp.partnerRetirementAge < 60 ? '⚠ Partner super locked until 60.' : 'Consider higher partner contributions or later target.'}`;
 
   el.innerHTML =
-    scCard2('👫', 'Partner retires now', 'You keep working to age ' + inp.retirementAge, p2Accessible, seqIfPartnerRetires, sc1Rows, sc1Footer) +
-    scCard2('🧑', 'You retire now', 'Partner keeps working to age ' + inp.partnerRetirementAge, p1Accessible, seqIfYouRetire, sc2Rows, sc2Footer) +
-    scCard2('🎯', 'You retire at ' + inp.retirementAge, 'Partner works to ' + inp.partnerRetirementAge, p1WealthAtTarget ?? 0, sc3Need, sc3Rows, sc3Footer) +
-    scCard2('🎯', 'Partner retires at ' + inp.partnerRetirementAge, 'You work to ' + inp.retirementAge, p2WealthAtTarget ?? 0, sc4Need, sc4Rows, sc4Footer);
+    scCard2('👫', 'Partner retires now', 'You keep working to age ' + inp.retirementAge, isReady(p2Accessible, seqIfPartnerRetires), blabel(p2Accessible, seqIfPartnerRetires), sc1Rows, sc1Footer) +
+    scCard2('🧑', 'You retire now', 'Partner keeps working to age ' + inp.partnerRetirementAge, isReady(p1Accessible, seqIfYouRetire), blabel(p1Accessible, seqIfYouRetire), sc2Rows, sc2Footer) +
+    scCard2('🎯', 'You retire at ' + inp.retirementAge, 'Partner works to ' + inp.partnerRetirementAge, isReady(p1WealthAtTarget ?? 0, sc3Need), blabel(p1WealthAtTarget ?? 0, sc3Need), sc3Rows, sc3Footer) +
+    scCard2('🎯', 'Partner retires at ' + inp.partnerRetirementAge, 'You work to ' + inp.retirementAge, isReady(p2WealthAtTarget ?? 0, sc4Need), blabel(p2WealthAtTarget ?? 0, sc4Need), sc4Rows, sc4Footer);
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1848,12 +2306,11 @@ function renderYearTable(rows, couple) {
   if (!el) return;
   const f = n => n > 0.5 ? fmt(n) : '—';
   const body = rows.map(r => {
-    // During retirement with a working partner, householdNet is partner-only salary
     const basePhase = r.retired
       ? (r.householdNet > 0 ? '🏖+💼 Partner working' : '🏖 Both retired')
       : '💼 Working';
-    const houseTag = r.houseExpAdj != null && r.houseExpAdj !== 0
-      ? (r.houseExpAdj > 0 ? ' · 🏠 mortgage' : ' · 🏠 owned') : '';
+    const houseTag = r.mortgageActive ? ' · 🏠 mortgage'
+      : (r.isHouseOwned ? ' · 🏠 owned' : '');
     const phase = basePhase + houseTag;
     const netIncome = f(r.annualTax.net ?? r.householdNet);
     return `
@@ -1897,7 +2354,11 @@ function renderYearTable(rows, couple) {
 
 let debounceTimer;
 let _lastRows = [];
-let _lastInp   = null; // snapshot of last parsed inputs, used by the what-if slider
+let _lastInp           = null;
+let _lastResult        = null;
+let _lastMc            = null;
+let _lastPartnerResult = null;
+let _lastPrimaryResult = null;
 
 function calc() {
   clearTimeout(debounceTimer);
@@ -1908,44 +2369,63 @@ function _calc() {
   const inp = getInputs();
 
   if (inp.retirementAge <= inp.currentAge) {
-    document.getElementById('retirementAge').value = inp.currentAge + 1;
+    const rEl = document.getElementById('retirementAge');
+    rEl.value = inp.currentAge + 1;
     inp.retirementAge = inp.currentAge + 1;
+    syncRange(rEl, 'lbl-retire', '', '');
   }
   if (inp.couple && inp.partnerRetirementAge <= inp.partnerAge) {
     const el = document.getElementById('partnerRetirementAge');
-    if (el) { el.value = inp.partnerAge + 1; inp.partnerRetirementAge = inp.partnerAge + 1; }
+    if (el) {
+      el.value = inp.partnerAge + 1;
+      inp.partnerRetirementAge = inp.partnerAge + 1;
+      syncRange(el, 'lbl-partner-retire', '', '');
+    }
   }
 
   updateCoupleUI(inp.couple);
 
   _lastInp = inp;
 
-  const p1SG    = inp.grossSalary * inp.sgRate;
+  const p1SG    = Math.min(inp.grossSalary, MAX_SG_BASE) * inp.sgRate;
+  const p2SG    = Math.min(inp.partnerSalary, MAX_SG_BASE) * inp.sgRate;
   const capRoom = Math.max(0, CONCESSIONAL_CAP - p1SG);
-  document.getElementById('cap-warning').classList.toggle('show', inp.extraConcessional > capRoom + inp.carryForwardCap);
+  const p1EligCF = inp.superBalance < CARRY_FWD_TSB_LIMIT ? inp.carryForwardCap : 0;
+  const p2EligCF = inp.partnerSuperBalance < CARRY_FWD_TSB_LIMIT ? inp.partnerCarryForwardCap : 0;
+
+  document.getElementById('cap-warning').classList.toggle('show',
+    inp.extraConcessional > capRoom + p1EligCF || inp.extraConcessional > inp.grossSalary);
   const pCapW = document.getElementById('p-cap-warning');
   if (pCapW) pCapW.classList.toggle('show',
-    inp.couple && inp.partnerExtraConcessional > Math.max(0, CONCESSIONAL_CAP - inp.partnerSalary * inp.sgRate) + inp.partnerCarryForwardCap);
+    inp.couple && (inp.partnerExtraConcessional > Math.max(0, CONCESSIONAL_CAP - p2SG) + p2EligCF || inp.partnerExtraConcessional > inp.partnerSalary));
 
-  const p1SacNow = Math.min(inp.extraConcessional, capRoom + inp.carryForwardCap);
-  const p2SacNow = Math.min(inp.partnerExtraConcessional, Math.max(0, CONCESSIONAL_CAP - inp.partnerSalary * inp.sgRate) + inp.partnerCarryForwardCap);
-  const p1NetNow = calcTax(inp.grossSalary, p1SacNow, inp.hecsActive, taxOpts(inp)).net;
-  const p2NetNow = calcTax(inp.partnerSalary, p2SacNow, inp.partnerHecsActive, taxOpts(inp)).net;
+  const p1SacNow = Math.max(0, Math.min(inp.extraConcessional, inp.grossSalary, capRoom + p1EligCF));
+  const p2SacNow = Math.max(0, Math.min(inp.partnerExtraConcessional, inp.partnerSalary, Math.max(0, CONCESSIONAL_CAP - p2SG) + p2EligCF));
+  const p1TaxY0 = calcTax(inp.grossSalary, p1SacNow, inp.hecsActive, taxOpts(inp));
+  const p2TaxY0 = calcTax(inp.partnerSalary, p2SacNow, inp.partnerHecsActive, taxOpts(inp));
+  const p1RepayY0 = Math.min(p1TaxY0.hecs, inp.hecsActive ? inp.hecsBalance : 0);
+  const p2RepayY0 = Math.min(p2TaxY0.hecs, inp.partnerHecsActive ? inp.partnerHecsBalance : 0);
+  const p1NetNow = p1TaxY0.net + (p1TaxY0.hecs - p1RepayY0);
+  const p2NetNow = p2TaxY0.net + (p2TaxY0.hecs - p2RepayY0);
 
   const result             = project(inp);
   const mc                 = runMonteCarlo(inp);
   const partnerResult      = inp.couple ? projectPartner(inp, p1NetNow) : null;
   const primaryResult      = inp.couple ? projectPrimary(inp, p2NetNow) : null;
-  _lastRows = result.rows;
+  _lastRows          = result.rows;
+  _lastResult        = result;
+  _lastMc            = mc;
+  _lastPartnerResult = partnerResult;
+  _lastPrimaryResult = primaryResult;
 
-  // Mortgage repayment hint — uses the actual simulated payoff age, which lands
-  // earlier than houseBuyAge+term whenever extra repayments are set.
+  // Mortgage repayment hint — uses the actual simulated payoff age
   const mortgageHint = document.getElementById('mortgage-repayment-hint');
   if (mortgageHint) {
     const repay = annualMortgageRepayment(inp.mortgageAmount, inp.mortgageRate, inp.mortgageTerm);
     const active = inp.houseDeposit > 0 || inp.mortgageAmount > 0;
     if (active && repay > 0) {
-      const paidAge = result.milestones.mortgagePaidAge ?? (inp.houseBuyAge + inp.mortgageTerm);
+      const effBuy = Math.max(inp.currentAge, inp.houseBuyAge);
+      const paidAge = result.milestones.mortgagePaidAge ?? (effBuy + inp.mortgageTerm);
       const extraNote = inp.extraRepaymentPct > 0 ? ` (with ${(inp.extraRepaymentPct * 100).toFixed(0)}% extra repayments)` : '';
       mortgageHint.textContent = `Annual repayment: ${fmt(repay)}/yr (${fmt(repay / 12)}/mo) · mortgage-free at age ${paidAge}${extraNote}`;
       mortgageHint.style.display = 'block';
@@ -1953,20 +2433,6 @@ function _calc() {
       mortgageHint.style.display = 'none';
     }
   }
-
-  window._lastAuditLog = [
-    '🔥 FIRE Calculator Audit Logs (Calculations & Output)',
-    '1. Parsed Inputs:\n' + JSON.stringify(inp, null, 2),
-    '2. Base Projection Result:\n' + JSON.stringify(result, null, 2),
-    '3. Monte Carlo Result:\n' + JSON.stringify(mc, null, 2),
-    inp.couple ? '4. Partner Projection Result:\n' + JSON.stringify(partnerResult, null, 2) : '',
-    inp.couple ? '5. Primary Individual Projection Result:\n' + JSON.stringify(primaryResult, null, 2) : ''
-  ].filter(Boolean).join('\n\n');
-
-  // Print structured audit logs to the console for testing and validation
-  console.groupCollapsed('🔥 FIRE Calculator Audit Logs (Calculations & Output)');
-  console.log(window._lastAuditLog);
-  console.groupEnd();
 
   const { rows, milestones, targets, bridgeAtRetirement, currentSavings } = result;
 
@@ -2028,7 +2494,7 @@ function _calc() {
   const baristaD = getCardData(milestones.baristaAge, 'baristaTgt', targets.baristaFI, inp.baristaExpenses);
   renderCard('barista', milestones.baristaAge, inp.currentAge, baristaD.targetVal,
     `Part-time ${fmt(inp.baristaIncome)}/yr until ${inp.baristaStopAge} &bull; ${hwDesc.toLowerCase()} need${inp.couple ? 's' : ''} ${fmt(baristaD.effExp)}/yr${houseExpNoteFn(baristaD.houseAdj)} ${hhTag}<br>
-     <span style="font-size:10px;color:var(--text-muted)">Target shrinks as part-time years shorten · ${getSuperNote(baristaD.age)}</span>`,
+     <span style="font-size:10px;color:var(--text-muted)">Target grows as part-time years shorten · ${getSuperNote(baristaD.age)}</span>`,
     baristaD.progress);
 
   const fullD = getCardData(milestones.fullAge, 'fullTgt', targets.fiEff, inp.fullExpenses);
@@ -2048,11 +2514,7 @@ function _calc() {
       const age = mAge != null ? mAge : inp.partnerRetirementAge;
       const row = pRows.find(r => r.age === age);
       const targetVal = row ? row[targetKey] : fallbackTarget;
-      
-      const primaryAgeAtThisTime = inp.currentAge + (age - inp.partnerAge);
-      const mainRow = rows.find(r => r.age === primaryAgeAtThisTime);
-      const houseAdj = mainRow ? (mainRow.houseExpAdj ?? 0) : 0;
-      
+      const houseAdj = row ? (row.houseExpAdj ?? 0) : 0;
       const effExp = Math.max(0, expBase + houseAdj);
       const gap = Math.max(0, effExp - p1NetNow);
       const progress = targetVal > 0 ? ((age >= PRESERVATION_AGE ? pTotal : pAccessible) / targetVal) * 100 : 100;
@@ -2065,9 +2527,10 @@ function _calc() {
           ? `Super accessible at 60 (condition of release) · unrestricted at 65`
           : `Super accessible unconditionally from age 65`);
 
-    const pCoastTgt = coastTarget(pt.fiEff, inp.partnerRetirementAge - inp.partnerAge,
+    const pCoastTgt = pRows[0]?.coastNow ?? coastTarget(pt.fiEff, inp.partnerRetirementAge - inp.partnerAge,
       (1 + inp.investReturn) / (1 + inp.inflation) - 1);
-    const pCoastProgress = pCoastTgt > 0 ? (pTotal / pCoastTgt) * 100 : 100;
+    const pCoastCheckW = inp.partnerRetirementAge >= PRESERVATION_AGE ? pTotal : pAccessible;
+    const pCoastProgress = pCoastTgt > 0 ? (pCoastCheckW / pCoastTgt) * 100 : 100;
 
     const pNoteFn = (age) => `<span style="font-size:10px;color:var(--text-muted)">Partner's individual wealth covering the gap while you work · ${pSuperNoteFn(age)}</span>`;
 
@@ -2079,7 +2542,7 @@ function _calc() {
 
     renderCard('p-coast', pm.coastAge, inp.partnerAge, pCoastTgt,
       `Partner's wealth coasts to the ${fmtK(pt.fiEff)} sequential gap target by ${inp.partnerRetirementAge}<br>
-       <span style="font-size:10px;color:var(--text-muted)">Partner's super + partner's own investments</span>`,
+       <span style="font-size:10px;color:var(--text-muted)">${inp.partnerRetirementAge >= PRESERVATION_AGE ? "Partner's super + partner's own investments" : 'Liquid assets bridge to age 60 — super compounds untouched'}</span>`,
       pCoastProgress);
 
     const pBaristaD = getPartnerCardData(pm.baristaAge, 'baristaTgt', pt.baristaFI, inp.baristaExpenses);
@@ -2094,31 +2557,36 @@ function _calc() {
        ${pNoteFn(pFullD.age)}`,
       pFullD.progress);
 
-    renderJointSummary(inp, milestones, pm);
+    renderJointSummary(inp, primaryResult?.milestones ?? milestones, pm, milestones);
   }
 
-  renderScenarios(inp, primaryResult ?? result, partnerResult);
+  renderScenarios(inp, primaryResult ?? result, partnerResult, result);
   renderWhatIf(inp, result);
   renderOptimisations(inp, result);
 
-  // ── TAX STRIP (primary earner only) ──
-  const p1Sacrifice = Math.min(inp.extraConcessional, capRoom);
-  const p1TaxNow    = calcTax(inp.grossSalary, p1Sacrifice, inp.hecsActive, taxOpts(inp));
-  const p1TaxTotal  = (p1TaxNow.raw || 0) + (p1TaxNow.hecs || 0);
-  const savingsRate = inp.grossSalary > 0 ? currentSavings / inp.grossSalary * 100 : 0;
+  // ── TAX STRIP (primary earner tax + household savings) ──
+  const p1TaxNow = { ...p1TaxY0, net: p1NetNow, hecs: p1RepayY0 };
+  const p1TaxTotal  = (p1TaxNow.raw || 0) + p1RepayY0;
+  const totalGross  = inp.grossSalary + inp.partnerSalary;
+  const savingsRate = totalGross > 0 ? currentSavings / totalGross * 100 : 0;
 
   const taxStripNote = document.getElementById('tax-strip-note');
-  if (taxStripNote) taxStripNote.textContent = inp.couple ? 'your figures only — not partner' : 'your figures';
+  if (taxStripNote) taxStripNote.textContent = inp.couple ? 'your tax & pay · household annual savings' : 'your figures';
   const taxChartSub = document.getElementById('tax-chart-sub');
   if (taxChartSub) taxChartSub.textContent = inp.couple ? "Where your gross salary goes — your figures only, not your partner's" : 'Where your gross salary goes';
+
+  const taxLabelEl = document.querySelector('#ts-tax')?.previousElementSibling;
+  if (taxLabelEl) taxLabelEl.textContent = p1RepayY0 > 0 ? 'Tax + Medicare + HECS' : 'Income Tax + Medicare';
+  const saveLabelEl = document.querySelector('#ts-save')?.previousElementSibling;
+  if (saveLabelEl) saveLabelEl.textContent = inp.couple ? 'Household Savings' : 'Annual Savings';
 
   document.getElementById('ts-gross').textContent   = fmt(inp.grossSalary);
   document.getElementById('ts-tax').textContent     = fmt(p1TaxTotal);
   document.getElementById('ts-taxrate').textContent = pct(p1TaxTotal / Math.max(1, inp.grossSalary)) + ' eff.';
   document.getElementById('ts-take').textContent    = fmt(p1TaxNow.net || 0);
   document.getElementById('ts-weekly').textContent  = fmt(Math.round((p1TaxNow.net || 0) / 52)) + '/wk';
-  document.getElementById('ts-sg').textContent      = fmt(p1SG + p1Sacrifice);
-  document.getElementById('ts-cap').textContent     = fmt(Math.max(0, CONCESSIONAL_CAP - p1SG - p1Sacrifice));
+  document.getElementById('ts-sg').textContent      = fmt(p1SG + p1SacNow);
+  document.getElementById('ts-cap').textContent     = fmt(Math.max(0, capRoom + p1EligCF - p1SacNow));
   document.getElementById('ts-save').textContent    = fmt(currentSavings);
   document.getElementById('ts-saverate').textContent = savingsRate.toFixed(0) + '% savings rate';
 
@@ -2140,7 +2608,7 @@ function _calc() {
   buildTimelineChart(milestones, inp.currentAge,
     partnerResult?.milestones ?? null, inp.couple ? inp.partnerAge : null);
   buildIncomeChart(inp, result);
-  buildTaxChart(p1TaxNow, inp.grossSalary, p1SG);
+  buildTaxChart(p1TaxNow, inp.grossSalary, p1SG, p1SacNow);
   buildSavingsChart(rows, inp.retirementAge, inp.partnerRetirementAge, inp);
   renderYearTable(rows, inp.couple);
 
@@ -2169,10 +2637,8 @@ document.getElementById('currentAge').addEventListener('input', function () {
   const v   = parseInt(this.value, 10);
   const ret = document.getElementById('retirementAge');
   ret.min = v + 1;
-  if (parseInt(ret.value, 10) <= v) {
-    ret.value = v + 5;
-    document.getElementById('lbl-retire').textContent = v + 5;
-  }
+  if (parseInt(ret.value, 10) <= v) ret.value = v + 5;
+  syncRange(ret, 'lbl-retire', '', '');
 });
 
 document.getElementById('partnerAge')?.addEventListener('input', function () {
@@ -2180,10 +2646,8 @@ document.getElementById('partnerAge')?.addEventListener('input', function () {
   const ret = document.getElementById('partnerRetirementAge');
   if (!ret) return;
   ret.min = v + 1;
-  if (parseInt(ret.value, 10) <= v) {
-    ret.value = v + 5;
-    document.getElementById('lbl-partner-retire').textContent = v + 5;
-  }
+  if (parseInt(ret.value, 10) <= v) ret.value = v + 5;
+  syncRange(ret, 'lbl-partner-retire', '', '');
 });
 
 document.addEventListener('DOMContentLoaded', () => {

@@ -4,9 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="An advanced Australian FIRE Calculator focusing on Tax & Superannuation, utilizing current legislative rates.">
-  <title>🇦🇺 Australian FIRE Calculator</title>
+  <title>Australian FIRE Calculator · Tax &amp; Super Edition</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔥</text></svg>">
-  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=20261125b">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -14,24 +17,42 @@
 <header>
   <div class="header-inner">
     <div class="header-brand">
-      <div class="header-icon">🇦🇺</div>
+      <div class="header-icon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2c.5 3.5 3 5.5 3 9a5 5 0 0 1-10 0c0-2 1-4 2.5-5.5C8 7 9.5 8 9.5 8S9 4.5 12 2z"/>
+          <path d="M12 22v-4"/>
+          <path d="M17 17l3-3"/>
+          <path d="M17 12h5v5"/>
+        </svg>
+      </div>
       <div>
-        <h1>Australian FIRE Calculator</h1>
-        <p>Tax &amp; Superannuation Edition · FY 2025–26 rates</p>
+        <div class="brand-title-row">
+          <h1>Australian FIRE Calculator</h1>
+          <span class="edition-badge">AU · FY 2025–26</span>
+        </div>
+        <p>Tax, Superannuation &amp; Age Pension Wealth Projection</p>
       </div>
     </div>
     <div class="header-right">
-      <div class="header-pills">
-        <span class="pill lean">Lean FIRE</span>
-        <span class="pill coast">Coast FIRE</span>
-        <span class="pill barista">Barista FIRE</span>
-        <span class="pill full">Full FIRE</span>
+      <div class="header-pills" aria-label="Jump to FIRE milestones">
+        <button type="button" class="pill lean" onclick="focusMilestone('card-lean')"><span class="dot lean"></span>Lean</button>
+        <button type="button" class="pill coast" onclick="focusMilestone('card-coast')"><span class="dot coast"></span>Coast</button>
+        <button type="button" class="pill barista" onclick="focusMilestone('card-barista')"><span class="dot barista"></span>Barista</button>
+        <button type="button" class="pill full" onclick="focusMilestone('card-full')"><span class="dot full"></span>Full FIRE</button>
       </div>
       <div class="header-controls">
-        <button class="ctrl-btn" onclick="copyAuditLogs()" title="Copy diagnostic audit logs to clipboard">📋</button>
-        <button class="ctrl-btn" id="share-btn" onclick="shareLink()" title="Copy a shareable link with your current inputs">🔗</button>
-        <button class="ctrl-btn" id="dark-toggle" onclick="toggleDark()" title="Toggle dark mode">🌙</button>
-        <button class="ctrl-btn" onclick="resetDefaults()" title="Reset all inputs to defaults">↺</button>
+        <button type="button" class="ctrl-btn" id="audit-btn" onclick="copyAuditLogs()" title="Copy diagnostic audit logs" aria-label="Copy diagnostic audit logs">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+        <button type="button" class="ctrl-btn" id="share-btn" onclick="shareLink()" title="Copy shareable link with your current inputs" aria-label="Copy shareable link">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        </button>
+        <button type="button" class="ctrl-btn" id="dark-toggle" onclick="toggleDark()" title="Toggle dark mode" aria-label="Toggle dark mode">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+        <button type="button" class="ctrl-btn" id="reset-btn" onclick="resetDefaults()" title="Reset all inputs to defaults" aria-label="Reset all inputs">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+        </button>
       </div>
     </div>
   </div>
@@ -44,8 +65,10 @@
 
     <!-- Profile -->
     <div class="section" id="sec-profile">
-      <div class="section-header" onclick="toggleSection('sec-profile')">
-        <span class="section-icon">👤</span>
+      <div class="section-header" role="button" tabindex="0" onclick="toggleSection('sec-profile')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSection('sec-profile')}">
+        <span class="section-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        </span>
         <h3>Your Profile</h3>
         <span class="section-chevron">▾</span>
       </div>
@@ -70,7 +93,7 @@
           </div>
           <div class="field">
             <label>Homeowner?</label>
-            <select id="homeowner" oninput="calc()">
+            <select id="homeowner" onchange="calc()">
               <option value="yes">Yes</option>
               <option value="no">No</option>
             </select>
@@ -79,7 +102,7 @@
 
         <!-- Partner age fields — shown only when Couple is selected -->
         <div id="partner-profile-fields" style="display:none">
-          <div class="partner-divider">👫 Partner Ages</div>
+          <div class="partner-divider">Partner Profile</div>
           <div class="field">
             <label>Partner's Current Age <span class="val" id="lbl-partner-age">32</span></label>
             <input type="range" id="partnerAge" min="18" max="70" value="32" aria-label="Partner's current age"
@@ -102,8 +125,10 @@
 
     <!-- Income -->
     <div class="section" id="sec-income">
-      <div class="section-header" onclick="toggleSection('sec-income')">
-        <span class="section-icon">💼</span>
+      <div class="section-header" role="button" tabindex="0" onclick="toggleSection('sec-income')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSection('sec-income')}">
+        <span class="section-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+        </span>
         <h3>Income &amp; Super</h3>
         <span class="section-chevron">▾</span>
       </div>
@@ -118,24 +143,24 @@
           <label>Salary Sacrifice to Super (extra)
             <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Additional pre-tax contributions beyond the 12% SG. Reduces taxable income. Annual concessional cap is $30,000 (includes employer SG).</span></div>
           </label>
-          <div class="input-prefix"><span>$</span><input type="number" id="extraConcessional" value="0" step="500" oninput="calc()"></div>
-          <div class="cap-warning" id="cap-warning">⚠ Exceeds concessional cap of $30,000/yr (including employer SG)</div>
+          <div class="input-prefix"><span>$</span><input type="number" id="extraConcessional" value="0" min="0" step="500" oninput="calc()"></div>
+          <div class="cap-warning" id="cap-warning">⚠ Exceeds concessional cap of $30,000/yr (including employer SG) or gross salary</div>
         </div>
         <div class="field">
           <label>Unused Carry-Forward Cap
             <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Unused concessional limits from the past 5 years. The calculator will consume this before applying the standard $30k cap. Requires a super balance under $500k.</span></div>
           </label>
-          <div class="input-prefix"><span>$</span><input type="number" id="carryForwardCap" value="0" step="1000" oninput="calc()"></div>
+          <div class="input-prefix"><span>$</span><input type="number" id="carryForwardCap" value="0" min="0" step="1000" oninput="calc()"></div>
         </div>
         <div class="field">
           <label>After-Tax Super Contributions
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Non-concessional contributions (after-tax money into super). Annual cap: $120,000 or up to $360,000 via bring-forward rule.</span></div>
+            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Non-concessional contributions (after-tax money into super). Annual cap: $120,000 (requires super balance under $2M).</span></div>
           </label>
-          <div class="input-prefix"><span>$</span><input type="number" id="extraNonConcessional" value="0" step="500" oninput="calc()"></div>
+          <div class="input-prefix"><span>$</span><input type="number" id="extraNonConcessional" value="0" min="0" step="500" oninput="calc()"></div>
         </div>
         <div class="toggle-row">
           <span class="toggle-label">Has HECS/HELP debt
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">2025–26 marginal repayment system: 15c per $ over $67,000 (17c over $125,000). Repayment income includes salary sacrifice. Repayments stop once the balance is paid off.</span></div>
+            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">2025–26 marginal repayment system: 15c per $ over $67,000, 17c over $125,000, and 10% of total income above $179,285. Repayment income includes salary sacrifice.</span></div>
           </span>
           <label class="toggle"><input type="checkbox" id="hasHECS" onchange="toggleVis('hecs-balance-field', this.checked);calc()"><span class="toggle-slider"></span></label>
         </div>
@@ -157,11 +182,11 @@
 
         <!-- Partner income — shown only when Couple is selected -->
         <div id="partner-income-fields" style="display:none">
-          <div class="partner-divider">👫 Partner Super &amp; Tax</div>
+          <div class="partner-divider">Partner Super &amp; Tax</div>
           <div class="field">
             <label>Partner's Salary Sacrifice to Super</label>
             <div class="input-prefix"><span>$</span><input type="number" id="partnerExtraConcessional" value="0" min="0" step="500" oninput="calc()"></div>
-            <div class="cap-warning" id="p-cap-warning">⚠ Exceeds partner's concessional cap of $30,000/yr (including employer SG)</div>
+            <div class="cap-warning" id="p-cap-warning">⚠ Exceeds partner's concessional cap of $30,000/yr (including employer SG) or salary</div>
           </div>
           <div class="field">
             <label>Partner's Unused Carry-Forward Cap</label>
@@ -191,39 +216,41 @@
 
     <!-- Current Position -->
     <div class="section" id="sec-wealth">
-      <div class="section-header" onclick="toggleSection('sec-wealth')">
-        <span class="section-icon">🏦</span>
+      <div class="section-header" role="button" tabindex="0" onclick="toggleSection('sec-wealth')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSection('sec-wealth')}">
+        <span class="section-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M3 10h18"/><path d="M5 6l7-3 7 3"/><path d="M4 10v11"/><path d="M20 10v11"/><path d="M8 14v3"/><path d="M12 14v3"/><path d="M16 14v3"/></svg>
+        </span>
         <h3>Current Wealth</h3>
         <span class="section-chevron">▾</span>
       </div>
       <div class="section-content">
         <div class="field">
           <label>Super Balance</label>
-          <div class="input-prefix"><span>$</span><input type="number" id="superBalance" value="85000" step="1000" oninput="calc()"></div>
+          <div class="input-prefix"><span>$</span><input type="number" id="superBalance" value="85000" min="0" step="1000" oninput="calc()"></div>
         </div>
         <div class="field">
           <label>Your Investment Portfolio
             <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Shares, ETFs, managed funds, etc. outside superannuation.</span></div>
           </label>
-          <div class="input-prefix"><span>$</span><input type="number" id="investBalance" value="30000" step="1000" oninput="calc()"></div>
+          <div class="input-prefix"><span>$</span><input type="number" id="investBalance" value="30000" min="0" step="1000" oninput="calc()"></div>
         </div>
         <div class="field">
           <label>Your Cash &amp; Savings</label>
-          <div class="input-prefix"><span>$</span><input type="number" id="cashBalance" value="20000" step="1000" oninput="calc()"></div>
+          <div class="input-prefix"><span>$</span><input type="number" id="cashBalance" value="20000" min="0" step="1000" oninput="calc()"></div>
         </div>
         <div id="partner-wealth-fields" style="display:none">
-          <div class="partner-divider">👫 Partner's Wealth</div>
+          <div class="partner-divider">Partner's Wealth</div>
           <div class="field">
             <label>Partner's Super Balance</label>
-            <div class="input-prefix"><span>$</span><input type="number" id="partnerSuperBalance" value="0" step="1000" oninput="calc()"></div>
+            <div class="input-prefix"><span>$</span><input type="number" id="partnerSuperBalance" value="0" min="0" step="1000" oninput="calc()"></div>
           </div>
           <div class="field">
             <label>Partner's Investment Portfolio</label>
-            <div class="input-prefix"><span>$</span><input type="number" id="partnerInvestBalance" value="0" step="1000" oninput="calc()"></div>
+            <div class="input-prefix"><span>$</span><input type="number" id="partnerInvestBalance" value="0" min="0" step="1000" oninput="calc()"></div>
           </div>
           <div class="field">
             <label>Partner's Cash &amp; Savings</label>
-            <div class="input-prefix"><span>$</span><input type="number" id="partnerCashBalance" value="0" step="1000" oninput="calc()"></div>
+            <div class="input-prefix"><span>$</span><input type="number" id="partnerCashBalance" value="0" min="0" step="1000" oninput="calc()"></div>
           </div>
           <div class="field">
             <label>Taxable investments held by
@@ -241,8 +268,10 @@
 
     <!-- Retirement Goals -->
     <div class="section" id="sec-goals">
-      <div class="section-header" onclick="toggleSection('sec-goals')">
-        <span class="section-icon">🎯</span>
+      <div class="section-header" role="button" tabindex="0" onclick="toggleSection('sec-goals')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSection('sec-goals')}">
+        <span class="section-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+        </span>
         <h3>Retirement Goals</h3>
         <span class="section-chevron">▾</span>
       </div>
@@ -250,31 +279,31 @@
         <div class="expenses-note">All expense figures are <strong>total household</strong> — the combined spending for your entire household, whether single or couple.</div>
         <div class="field">
           <label>Current Annual Expenses <span class="field-tag hh-tag">household total</span></label>
-          <div class="input-prefix"><span>$</span><input type="number" id="currentExpenses" value="60000" step="1000" oninput="calc()"></div>
+          <div class="input-prefix"><span>$</span><input type="number" id="currentExpenses" value="60000" min="0" step="1000" oninput="calc()"></div>
           <div class="hint">Everything your household spends now, in today's dollars</div>
         </div>
         <div class="field">
-          <label><span style="color:var(--lean);font-weight:700;">🔴 Lean FIRE</span> Annual Expenses <span class="field-tag hh-tag">household total</span></label>
-          <div class="input-prefix"><span>$</span><input type="number" id="leanExpenses" value="32000" step="500" oninput="calc()"></div>
+          <label><span class="label-dot-wrap"><span class="dot lean"></span><span style="color:var(--lean);font-weight:700;">Lean FIRE</span> Annual Expenses</span> <span class="field-tag hh-tag">household total</span></label>
+          <div class="input-prefix"><span>$</span><input type="number" id="leanExpenses" value="32000" min="0" step="500" oninput="calc()"></div>
           <div class="hint">Bare essentials for the whole household — budget travel, minimal luxuries</div>
         </div>
         <div class="field">
-          <label><span style="color:var(--barista);font-weight:700;">🟢 Barista FIRE</span> Annual Expenses <span class="field-tag hh-tag">household total</span></label>
-          <div class="input-prefix"><span>$</span><input type="number" id="baristaExpenses" value="55000" step="500" oninput="calc()"></div>
+          <label><span class="label-dot-wrap"><span class="dot barista"></span><span style="color:var(--barista);font-weight:700;">Barista FIRE</span> Annual Expenses</span> <span class="field-tag hh-tag">household total</span></label>
+          <div class="input-prefix"><span>$</span><input type="number" id="baristaExpenses" value="55000" min="0" step="500" oninput="calc()"></div>
         </div>
         <div class="field">
-          <label><span style="color:var(--barista);font-weight:700;">🟢 Barista</span> Part-Time Income <span class="field-tag">one person</span></label>
-          <div class="input-prefix"><span>$</span><input type="number" id="baristaIncome" value="25000" step="500" oninput="calc()"></div>
+          <label><span class="label-dot-wrap"><span class="dot barista"></span><span style="color:var(--barista);font-weight:700;">Barista</span> Part-Time Income</span> <span class="field-tag">one person</span></label>
+          <div class="input-prefix"><span>$</span><input type="number" id="baristaIncome" value="25000" min="0" step="500" oninput="calc()"></div>
           <div class="hint">Income from casual / part-time work (one semi-retired person)</div>
         </div>
         <div class="field">
-          <label><span style="color:var(--full);font-weight:700;">🟣 Full FIRE</span> Annual Expenses <span class="field-tag hh-tag">household total</span></label>
-          <div class="input-prefix"><span>$</span><input type="number" id="fullExpenses" value="70000" step="500" oninput="calc()"></div>
+          <label><span class="label-dot-wrap"><span class="dot full"></span><span style="color:var(--full);font-weight:700;">Full FIRE</span> Annual Expenses</span> <span class="field-tag hh-tag">household total</span></label>
+          <div class="input-prefix"><span>$</span><input type="number" id="fullExpenses" value="70000" min="0" step="500" oninput="calc()"></div>
           <div class="hint">Comfortable retirement lifestyle for the whole household, today's dollars</div>
         </div>
         <div class="field">
           <label>Stop part-time (Barista) work at age
-            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Age when part-time work ends in Barista FIRE. The Barista target is reduced by the value of part-time income earned between now and this age, so it shrinks the later you start.</span></div>
+            <div class="tooltip-wrap"><span class="tooltip-icon" tabindex="0">?</span><span class="tooltip-text">Age when part-time work ends in Barista FIRE. The Barista target is reduced by the after-tax value of part-time income earned between now and this age, so the target grows as your part-time period shortens.</span></div>
           </label>
           <input type="number" id="baristaStopAge" value="65" min="40" max="80" step="1" oninput="calc()">
           <div class="hint">Typically when you want to fully stop working, e.g. 65</div>
@@ -302,8 +331,10 @@
 
     <!-- Life Events -->
     <div class="section collapsed" id="sec-events">
-      <div class="section-header" onclick="toggleSection('sec-events')">
-        <span class="section-icon">📅</span>
+      <div class="section-header" role="button" tabindex="0" onclick="toggleSection('sec-events')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSection('sec-events')}">
+        <span class="section-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </span>
         <h3>Life Events</h3>
         <span class="section-chevron">▾</span>
       </div>
@@ -331,7 +362,7 @@
         </div>
 
         <!-- House Purchase -->
-        <div class="partner-divider" style="margin-top:12px">🏠 House Purchase</div>
+        <div class="partner-divider" style="margin-top:12px">House Purchase</div>
         <div class="toggle-row">
           <span class="toggle-label">Plan to buy a house?</span>
           <label class="toggle"><input type="checkbox" id="planHousePurchase" onchange="toggleVis('house-purchase-fields', this.checked);calc()"><span class="toggle-slider"></span></label>
@@ -389,8 +420,10 @@
 
     <!-- Assumptions -->
     <div class="section collapsed" id="sec-assumptions">
-      <div class="section-header" onclick="toggleSection('sec-assumptions')">
-        <span class="section-icon">⚙️</span>
+      <div class="section-header" role="button" tabindex="0" onclick="toggleSection('sec-assumptions')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSection('sec-assumptions')}">
+        <span class="section-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+        </span>
         <h3>Advanced Assumptions</h3>
         <span class="section-chevron">▾</span>
       </div>
@@ -441,7 +474,7 @@
           <label>Employer SG Rate (%) <span class="val" id="lbl-sg">12.0%</span></label>
           <input type="range" id="sgRate" min="9" max="15" step="0.5" value="12" aria-label="Employer super guarantee rate percent"
             oninput="syncRange(this,'lbl-sg','','%');calc()">
-          <div class="hint">12% from 1 Jul 2025, may rise further</div>
+          <div class="hint">12% from 1 Jul 2025 (capped at $250k max SG salary base)</div>
         </div>
         <div class="field">
           <label>Cash / Savings Return (% p.a.) <span class="val" id="lbl-cash">4.0%</span></label>
@@ -464,7 +497,7 @@
     <p class="section-label" id="main-milestones-label">FIRE Milestones</p>
     <div class="milestone-grid">
       <div class="milestone-card lean" id="card-lean">
-        <div class="mc-label">🔴 Lean FIRE</div>
+        <div class="mc-label"><span class="dot lean"></span>Lean FIRE</div>
         <div class="mc-age" id="lean-age">—</div>
         <div class="mc-years" id="lean-years"></div>
         <div class="mc-number" id="lean-number"></div>
@@ -473,7 +506,7 @@
         <div class="progress-pct" id="lean-pct">0% funded</div>
       </div>
       <div class="milestone-card coast" id="card-coast">
-        <div class="mc-label">🔵 Coast FIRE</div>
+        <div class="mc-label"><span class="dot coast"></span>Coast FIRE</div>
         <div class="mc-age" id="coast-age">—</div>
         <div class="mc-years" id="coast-years"></div>
         <div class="mc-number" id="coast-number"></div>
@@ -482,7 +515,7 @@
         <div class="progress-pct" id="coast-pct">0% funded</div>
       </div>
       <div class="milestone-card barista" id="card-barista">
-        <div class="mc-label">🟢 Barista FIRE</div>
+        <div class="mc-label"><span class="dot barista"></span>Barista FIRE</div>
         <div class="mc-age" id="barista-age">—</div>
         <div class="mc-years" id="barista-years"></div>
         <div class="mc-number" id="barista-number"></div>
@@ -491,7 +524,7 @@
         <div class="progress-pct" id="barista-pct">0% funded</div>
       </div>
       <div class="milestone-card full" id="card-full">
-        <div class="mc-label">🟣 Full FIRE</div>
+        <div class="mc-label"><span class="dot full"></span>Full FIRE</div>
         <div class="mc-age" id="full-age">—</div>
         <div class="mc-years" id="full-years"></div>
         <div class="mc-number" id="full-number"></div>
@@ -506,7 +539,7 @@
       <p class="section-label">Sequential FIRE: Partner Retires First <span class="section-label-note">partner's individual wealth vs household gap — expenses minus your salary</span></p>
       <div class="milestone-grid">
         <div class="milestone-card lean partner-card" id="p-card-lean">
-          <div class="mc-label">🔴 Partner Lean</div>
+          <div class="mc-label"><span class="dot lean"></span>Partner Lean</div>
           <div class="mc-age" id="p-lean-age">—</div>
           <div class="mc-years" id="p-lean-years"></div>
           <div class="mc-number" id="p-lean-number"></div>
@@ -515,7 +548,7 @@
           <div class="progress-pct" id="p-lean-pct">0% funded</div>
         </div>
         <div class="milestone-card coast partner-card" id="p-card-coast">
-          <div class="mc-label">🔵 Partner Coast FIRE</div>
+          <div class="mc-label"><span class="dot coast"></span>Partner Coast FIRE</div>
           <div class="mc-age" id="p-coast-age">—</div>
           <div class="mc-years" id="p-coast-years"></div>
           <div class="mc-number" id="p-coast-number"></div>
@@ -524,7 +557,7 @@
           <div class="progress-pct" id="p-coast-pct">0% funded</div>
         </div>
         <div class="milestone-card barista partner-card" id="p-card-barista">
-          <div class="mc-label">🟢 Partner Barista FIRE</div>
+          <div class="mc-label"><span class="dot barista"></span>Partner Barista FIRE</div>
           <div class="mc-age" id="p-barista-age">—</div>
           <div class="mc-years" id="p-barista-years"></div>
           <div class="mc-number" id="p-barista-number"></div>
@@ -533,7 +566,7 @@
           <div class="progress-pct" id="p-barista-pct">0% funded</div>
         </div>
         <div class="milestone-card full partner-card" id="p-card-full">
-          <div class="mc-label">🟣 Partner Full FIRE</div>
+          <div class="mc-label"><span class="dot full"></span>Partner Full FIRE</div>
           <div class="mc-age" id="p-full-age">—</div>
           <div class="mc-years" id="p-full-years"></div>
           <div class="mc-number" id="p-full-number"></div>
@@ -544,7 +577,7 @@
       </div>
 
       <!-- Joint Retirement Analysis -->
-      <p class="section-label" style="margin-top:20px">🤝 Joint Retirement Analysis</p>
+      <p class="section-label" style="margin-top:20px">Joint Retirement Analysis</p>
       <div class="joint-card">
         <div id="joint-summary"></div>
       </div>
@@ -552,20 +585,20 @@
 
     <!-- Scenario Analysis -->
     <div id="scenario-section">
-      <p class="section-label" style="margin-top:24px">📋 Alternate Scenarios</p>
+      <p class="section-label" style="margin-top:24px">Alternate Scenarios</p>
       <p class="scenario-intro" id="scenario-intro">Simulate different decisions (like retiring immediately or coasting) to see if the portfolio survives to age 90.</p>
       <div class="scenario-grid" id="scenario-grid"></div>
     </div>
 
     <!-- Interactive What-If Analysis -->
     <div id="whatif-interactive-section">
-      <p class="section-label" style="margin-top:24px">🎛️ What-If: Retirement Timing</p>
+      <p class="section-label" style="margin-top:24px">What-If: Retirement Timing</p>
       <p class="scenario-intro">Adjust target retirement ages below to instantly see the impact on your projected wealth at age 90 and FIRE targets.</p>
       <div id="whatif-sliders-container">
         <div class="whatif-block">
           <div style="margin-bottom: 12px">
             <div class="whatif-label">
-              🔀 What if you retire at age&nbsp;<span class="whatif-age-val" id="wi-you-val">55</span>
+              What if you retire at age <span class="whatif-age-val" id="wi-you-val">55</span>
             </div>
             <input type="range" class="whatif-slider" id="wi-you-retire"
               min="18" max="75" step="1" value="55"
@@ -573,7 +606,7 @@
           </div>
           <div id="wi-partner-container" style="margin-bottom: 12px; display: none;">
             <div class="whatif-label">
-              🔀 What if partner retires at age&nbsp;<span class="whatif-age-val" id="wi-partner-val">55</span>
+              What if partner retires at age <span class="whatif-age-val" id="wi-partner-val">55</span>
             </div>
             <input type="range" class="whatif-slider" id="wi-partner-retire"
               min="18" max="75" step="1" value="55"
@@ -586,13 +619,13 @@
 
     <!-- Optimization Opportunities -->
     <div id="optimization-section">
-      <p class="section-label" style="margin-top:24px">💡 Optimisation Opportunities</p>
+      <p class="section-label" style="margin-top:24px">Optimisation Opportunities</p>
       <p class="scenario-intro">Automated tweaks to your current plan to save tax or increase long-term wealth.</p>
       <div class="scenario-grid" id="opt-grid"></div>
     </div>
 
     <!-- Current Year Summary -->
-    <p class="section-label">This Year's Finances <span class="section-label-note" id="tax-strip-note">your figures</span></p>
+    <p class="section-label" style="margin-top:24px">This Year's Finances <span class="section-label-note" id="tax-strip-note">your figures</span></p>
     <div class="tax-strip" id="tax-strip">
       <div class="tax-item">
         <div class="ti-label">Gross Salary</div>
@@ -637,7 +670,7 @@
         <div class="pc-label" id="pos-invest-label">Investments &amp; Cash</div>
         <div class="pc-val" id="pos-invest">—</div>
       </div>
-      <div class="pos-card">
+      <div class="pos-card total-card">
         <div class="pc-label" id="pos-total-label">Total Wealth</div>
         <div class="pc-val" id="pos-total">—</div>
       </div>
@@ -684,7 +717,7 @@
     <details class="year-details">
       <summary>
         <span>Show full projection table <span class="section-label-note" id="year-table-note">all values in today's dollars</span></span>
-        <button class="mini-btn" onclick="event.preventDefault();exportCSV()" title="Download the projection as CSV">⬇ CSV</button>
+        <button type="button" class="mini-btn" onclick="event.preventDefault();exportCSV()" title="Download the projection as CSV">⬇ Export CSV</button>
       </summary>
       <div class="year-table-wrap" id="year-table"></div>
     </details>
@@ -692,18 +725,21 @@
     <p class="disclaimer">
       <strong>General information only — not financial advice.</strong> This is a simplified model:
       tax brackets, super caps and Age Pension thresholds are assumed to keep pace with inflation;
-      investment income is taxed annually at the holder's marginal rate on the assessable share you set
-      (CGT on final sale is not modelled); each partner's super is tracked separately with their own
-      preservation age, minimum drawdowns and Age Pension means-test treatment (untapped accumulation
-      super of an under-67 partner is exempt); contribution routing approximates contribution-splitting
-      rules. Carry-forward concessional caps, FHSS, insurance premiums in super and survivorship are not
-      modelled; a warning shows if either partner is likely to exceed the $2M transfer balance cap.
-      FY 2025–26 rates. Consider advice from a licensed professional before acting.
+      nominal investment distributions and cash interest are taxed annually at the holder's marginal rate
+      (including SAPTO from age 67, MLS and HELP where applicable; CGT on final sale is not modelled);
+      each partner's super is tracked separately with their own preservation age, minimum drawdowns,
+      $500k carry-forward balance check (without 5-year expiry tracking), $2M non-concessional cap check,
+      and Age Pension means-test treatment (untapped accumulation super of an under-67 partner is exempt);
+      contribution routing approximates contribution-splitting rules. FHSS, insurance premiums in super and
+      survivorship are not modelled; a warning shows if either partner is likely to exceed the $2M transfer
+      balance cap. FY 2025–26 rates. Consider advice from a licensed professional before acting.
     </p>
 
   </main>
 </div>
 
-<script src="app.js?v=20260717b"></script>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="app.js?v=20261125b"></script>
 </body>
 </html>

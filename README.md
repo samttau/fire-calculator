@@ -11,7 +11,7 @@ Most FIRE calculators are American and don't handle things like super guarantee,
 - Lets you plan as a single person or a couple
 - Charts your balance over time so you can see the effect of changing an input
 - Generates a shareable link that encodes your inputs, so you can send someone your exact scenario
-- Works fully offline after the first load, no backend, no accounts, no data leaving your browser
+- Works in the browser with no backend, no accounts, and no financial data leaving your device (Chart.js loads from CDN and works offline once cached by your browser)
 
 ## Running it locally
 
